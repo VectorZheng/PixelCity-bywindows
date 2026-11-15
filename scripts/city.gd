@@ -5,6 +5,8 @@ const APPROVED_BACKGROUND: Texture2D = preload("res://assets/shenzhen-reference.
 const BUS: Texture2D = preload("res://assets/bus.png")
 const CAR: Texture2D = preload("res://assets/car.png")
 const METRO: Texture2D = preload("res://assets/metro.png")
+const PEOPLE: Texture2D = preload("res://assets/manga-pedestrians.png")
+const PEOPLE_EXTRA: Texture2D = preload("res://assets/kyoto-star-characters.png")
 const RIGHT_ENTRANCE: Texture2D = preload("res://assets/right-entrance.png")
 const BUS_SOURCE := Rect2(59, 51, 2072, 626)
 const CAR_SOURCE := Rect2(58, 36, 2064, 675)
@@ -25,11 +27,14 @@ var display_mode := "fill"
 var settings_path := ""
 var bus_reversed: Texture2D
 var car_reversed: Texture2D
+var people_reversed: Texture2D
+var people_extra_reversed: Texture2D
 var panel_visible := true
 var _http: HTTPRequest
 var _panel: PanelContainer
 var _status_label: Label
 var _mode_select: OptionButton
+var _screen_font: SystemFont
 
 func _ready() -> void:
 	Engine.max_fps = 20
@@ -39,11 +44,15 @@ func _ready() -> void:
 	_load_display_mode()
 	bus_reversed = _flip_texture(BUS)
 	car_reversed = _flip_texture(CAR)
+	people_reversed = _flip_texture(PEOPLE)
+	people_extra_reversed = _flip_texture(PEOPLE_EXTRA)
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT_SECONDS
 	add_child(_http)
 	_configure_proxy()
 	_http.request_completed.connect(_on_weather_completed)
+	_screen_font = SystemFont.new()
+	_screen_font.font_names = PackedStringArray(["Microsoft YaHei", "SimHei", "Arial"])
 	_build_panel()
 	if OS.get_cmdline_user_args().has("--capture-fit"):
 		display_mode = "fit"
@@ -150,8 +159,12 @@ func _draw() -> void:
 	draw_texture_rect_region(APPROVED_BACKGROUND, skyline, skyline)
 	# Replace the opaque, painted-in shelter with matching street before traffic.
 	draw_texture_rect_region(BACKDROP, Rect2(990, 470, 190, 94), Rect2(700, 470, 190, 94))
+	_draw_station_screens()
+	_draw_people(true)
 	_draw_traffic(image_size)
 	_draw_foreground()
+	_draw_people(false)
+	_draw_street_lights(Time.get_datetime_dict_from_system())
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# The approved artwork depicts dusk. Tint gently for daytime and night;
 	# sunset remains unchanged. The image itself stays intact.
@@ -172,6 +185,60 @@ func _draw() -> void:
 			var x := fposmod(float(i * 173) + motion * 0.25, size.x)
 			var y := fposmod(float(i * 97) + motion, size.y * 0.72)
 			draw_line(Vector2(x, y), Vector2(x - 4.0, y + 10.0), Color(0.75, 0.83, 1.0, 0.32), 1.0)
+
+func _train_status(seconds: float) -> String:
+	var cycle := fposmod(seconds, 100.0)
+	if cycle < 19.0: return "模拟 列车进站"
+	if cycle < 42.0: return "模拟 列车停站"
+	if cycle < 61.0: return "模拟 列车驶离"
+	return "模拟 %d秒后进站" % int(ceil(100.0 - cycle))
+
+func _draw_station_screens() -> void:
+	var now := Time.get_datetime_dict_from_system()
+	var clock := "%02d:%02d" % [now.hour, now.minute]
+	for x in [630, 1444]:
+		draw_rect(Rect2(x, 601, 130, 33), Color("111c32"))
+		draw_rect(Rect2(x, 601, 130, 3), Color("f1a265"))
+		draw_string(_screen_font, Vector2(x + 4, 614), "3号线 华新  " + clock, HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f9e9d1"))
+		draw_string(_screen_font, Vector2(x + 4, 628), _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f6bb73"))
+
+func _draw_people(platform: bool) -> void:
+	var count := 5 if platform else 8
+	for i in range(count):
+		var length := 1350.0 if platform else 1500.0
+		var speed := 13.0 + (i % 3) * 2.0
+		var direction := 1 if i % 2 == 0 else -1
+		var progress := fposmod(animation_time * speed + i * 231.0, length)
+		var x := 410.0 + (progress if direction == 1 else length - progress)
+		var y := 694.0 if platform else 559.0
+		var phase := int(floor(animation_time * 5.0 + i)) % 4
+		_draw_person(Vector2(round(x), y), phase, direction, i)
+
+func _draw_person(pos: Vector2, phase: int, direction: int, variant: int) -> void:
+	# One pose per character; alternating bob provides an interim walking motion.
+	var column := variant % 4
+	var source := Rect2(column * 543, 0, 543, 724)
+	var texture: Texture2D = PEOPLE_EXTRA if variant % 8 >= 4 else PEOPLE
+	if direction < 0:
+		texture = people_extra_reversed if variant % 8 >= 4 else people_reversed
+		source.position.x = 2172 - source.position.x - source.size.x
+	var bounce := 1 if phase % 2 == 1 else 0
+	draw_texture_rect_region(texture, Rect2(pos.x - 13, pos.y - 38 - bounce, 27, 38), source)
+
+func _light_strength(now: Dictionary) -> float:
+	var seconds := int(now.hour) * 3600 + int(now.minute) * 60 + int(now.second)
+	if seconds >= 18 * 3600: return clampf(float(seconds - 18 * 3600) / 300.0, 0.0, 1.0)
+	if seconds < 6 * 3600: return 1.0
+	if seconds < 6 * 3600 + 300: return 1.0 - float(seconds - 6 * 3600) / 300.0
+	return 0.0
+
+func _draw_street_lights(now: Dictionary) -> void:
+	var strength := _light_strength(now)
+	if strength <= 0.0: return
+	for x in [28, 236, 390, 549, 749, 918, 1139, 1296, 1470, 1651, 1839, 2013, 2157]:
+		for radius in [22, 15, 8]:
+			draw_circle(Vector2(x, 404), radius, Color(1.0, 0.69, 0.35, strength * 0.025))
+		draw_circle(Vector2(x, 404), 3, Color(1.0, 0.82, 0.52, strength * 0.6))
 
 func _display_rect(view: Vector2, artwork: Vector2, mode: String) -> Rect2:
 	if mode == "stretch":
@@ -227,14 +294,47 @@ func _draw_traffic(bounds: Vector2) -> void:
 	var far_car_x := fposmod(animation_time * 48.0 + 1250.0, bounds.x + 210.0) - 210.0
 	var near_bus_x := _bus_x(animation_time + 32.0, bounds.x, true)
 	var near_car_x := bounds.x - fposmod(animation_time * 41.0 + 1320.0, bounds.x + 210.0)
-	_draw_vehicle(BUS, BUS_SOURCE, Rect2(far_bus_x, 437, 185, 56), bounds)
-	_draw_vehicle(CAR, CAR_SOURCE, Rect2(far_car_x, 457, 80, 27), bounds)
-	_draw_vehicle(bus_reversed, BUS_SOURCE, Rect2(near_bus_x, 480, 170, 47), bounds, true)
-	_draw_vehicle(car_reversed, CAR_SOURCE, Rect2(near_car_x, 495, 80, 26), bounds, true)
+	# Paint by wheel baseline: a nearer vehicle occludes a farther one.
+	_draw_pixel_car(Rect2(far_car_x, 457, 80, 27), bounds, false)
+	_draw_pixel_bus(Rect2(far_bus_x, 437, 185, 56), bounds, false)
+	_draw_pixel_car(Rect2(near_car_x, 495, 80, 26), bounds, true)
+	_draw_pixel_bus(Rect2(near_bus_x, 480, 170, 47), bounds, true)
 	# This is a visual simulation, not a live transit position or timetable.
 	# The wheel baseline must coincide with the foreground rails, below the
 	# platform floor rather than on the passenger walking surface.
 	_draw_vehicle(METRO, METRO_SOURCE, Rect2(_train_x(animation_time, bounds.x), 658, 660, 51), bounds)
+
+func _vehicle_part(target: Rect2, part: Rect2, color: Color, bounds: Vector2, reversed: bool) -> void:
+	var px := 1.0 - part.position.x - part.size.x if reversed else part.position.x
+	var rect := Rect2(target.position + Vector2(px, part.position.y) * target.size, part.size * target.size)
+	var clipped := rect.intersection(Rect2(Vector2.ZERO, bounds))
+	if clipped.has_area(): draw_rect(clipped, color)
+
+func _draw_pixel_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
+	_vehicle_part(target, Rect2(0.03, 0.84, 0.94, 0.12), Color(0.04, 0.06, 0.11, 0.38), bounds, reversed)
+	_vehicle_part(target, Rect2(0.03, 0.15, 0.91, 0.66), Color("26354c"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.06, 0.20, 0.86, 0.51), Color("eac7a1"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.07, 0.43, 0.84, 0.16), Color("b84d51"), bounds, reversed)
+	for i in range(5):
+		_vehicle_part(target, Rect2(0.10 + i * 0.135, 0.24, 0.10, 0.21), Color("42637a"), bounds, reversed)
+		_vehicle_part(target, Rect2(0.11 + i * 0.135, 0.25, 0.075, 0.035), Color("8db2b8"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.79, 0.23, 0.09, 0.22), Color("42637a"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.91, 0.54, 0.035, 0.09), Color("ffd88a"), bounds, reversed)
+	for x in [0.18, 0.73]:
+		_vehicle_part(target, Rect2(x, 0.70, 0.12, 0.22), Color("1b2637"), bounds, reversed)
+		_vehicle_part(target, Rect2(x + 0.035, 0.75, 0.05, 0.10), Color("93a0a4"), bounds, reversed)
+
+func _draw_pixel_car(target: Rect2, bounds: Vector2, reversed: bool) -> void:
+	_vehicle_part(target, Rect2(0.04, 0.80, 0.92, 0.15), Color(0.04, 0.06, 0.11, 0.4), bounds, reversed)
+	_vehicle_part(target, Rect2(0.20, 0.16, 0.52, 0.45), Color("26354c"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.24, 0.22, 0.18, 0.26), Color("8fb5ba"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.46, 0.22, 0.20, 0.26), Color("8fb5ba"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.05, 0.49, 0.89, 0.30), Color("c57767"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.08, 0.52, 0.80, 0.06), Color("e8ae91"), bounds, reversed)
+	_vehicle_part(target, Rect2(0.88, 0.54, 0.06, 0.08), Color("ffdfa1"), bounds, reversed)
+	for x in [0.18, 0.70]:
+		_vehicle_part(target, Rect2(x, 0.70, 0.14, 0.23), Color("202a3b"), bounds, reversed)
+		_vehicle_part(target, Rect2(x + 0.04, 0.75, 0.06, 0.10), Color("aab2b0"), bounds, reversed)
 
 func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
 	# Each loop includes an approach, a short stop, and a departure.
