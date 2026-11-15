@@ -6,6 +6,7 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class DesktopHostNative {
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lparam);
     [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr FindWindow(string cls, string title);
     [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
@@ -42,6 +43,7 @@ public static class DesktopHostNative {
     }
 }
 '@
+[void][DesktopHostNative]::SetProcessDPIAware()
 $layer = [DesktopHostNative]::FindWallpaperLayer()
 if ($Probe) {
     if ($layer -eq [IntPtr]::Zero) { Write-Output 'WALLPAPER_LAYER_NOT_FOUND'; exit 2 }
@@ -95,7 +97,7 @@ try {
     }
     $displayMenu = [System.Windows.Forms.ToolStripMenuItem]::new('Display mode')
     [void]$menu.Items.Add($displayMenu)
-    foreach ($choice in @(@('Fill (crop)', 'fill'), @('Fit (letterbox)', 'fit'), @('Stretch', 'stretch'))) {
+    foreach ($choice in @(@('Fill (crop)', 'fill'), @('Fit (letterbox)', 'fit'), @('Stretch', 'stretch'), @('Full scene + extended sky', 'sky'))) {
         $item = [System.Windows.Forms.ToolStripMenuItem]::new($choice[0])
         $item.Tag = $choice[1]
         $item.add_Click({

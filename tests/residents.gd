@@ -30,5 +30,23 @@ func _initialize() -> void:
 	train.state = "walk"
 	sim.step(0.1, 20.0, false)
 	assert(train.state == "boarding")
+	# A delayed frame must advance the same walking distance as smaller steps.
+	var slow = Residents.new()
+	var smooth = Residents.new()
+	slow.step(0.5, 4.5, false)
+	for i in range(5): smooth.step(0.1, 4.1 + i * 0.1, false)
+	assert(is_equal_approx(slow.people[2].x, smooth.people[2].x))
+	assert(is_equal_approx(slow.people[2].walk_distance, smooth.people[2].walk_distance))
+	var sheltered: Dictionary = slow.people[3]
+	sheltered.x = 1080.0 + (sheltered.id % 3) * 18.0
+	slow.step(0.1, 5.0, true)
+	assert(not sheltered.moving)
+	var edge: Dictionary = slow.people[2]
+	edge.x = 1729.9
+	edge.direction = 1
+	slow.step(0.1, 6.0, false)
+	assert(edge.direction == -1)
+	slow.step(0.1, 6.1, false)
+	assert(edge.x < 1730.0)
 	print("RESIDENT_TEST_PASSED")
 	quit(0)
