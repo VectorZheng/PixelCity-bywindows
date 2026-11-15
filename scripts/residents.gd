@@ -5,11 +5,14 @@ extends RefCounted
 var people: Array[Dictionary] = []
 
 func _init() -> void:
-	for i in range(8):
-		people.append({"id": i, "platform": i == 1 or i == 5, "x": 990.0 if i < 2 else 550.0 + i * 140.0,
+	for i in range(18):
+		var promenade := i >= 8 and i <= 13
+		var platform := i in [1, 5, 14, 17]
+		var x := (470.0 + (i - 8) * 220.0) if promenade else (990.0 if i < 2 else 480.0 + fposmod(i * 211.0, 1230.0))
+		people.append({"id": i, "platform": platform, "promenade": promenade, "x": x,
 			"direction": 1 if i % 2 == 0 else -1, "state": "walk", "timer": 0.0,
 			"cooldown": 0.0, "umbrella": i % 2 == 0, "mood": "开心",
-			"walk_distance": 0.0, "moving": false})
+			"walk_distance": 0.0, "moving": false, "idle_due": 8.0 + i * 3.7})
 
 func step(delta: float, seconds: float, raining: bool) -> void:
 	# Substep long frames rather than discarding elapsed time. Use the matching
@@ -35,7 +38,7 @@ func _step_once(dt: float, seconds: float, raining: bool) -> void:
 
 func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool) -> void:
 	p.cooldown = maxf(0.0, p.cooldown - dt)
-	if p.state in ["greet", "boarding", "onboard"]:
+	if p.state in ["greet", "boarding", "onboard", "idle"]:
 		p.timer -= dt
 		if p.state == "boarding":
 			p.x = move_toward(p.x, 1060.0 if not p.platform else 1040.0, 24.0 * dt)
@@ -52,12 +55,19 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool) -> 
 	if raining and not p.platform and not p.umbrella:
 		p.state = "shelter"
 		p.mood = "避雨"
-		var shelter_x: float = 1080.0 + (p.id % 3) * 18.0
+		var shelter_x: float = (425.0 + (p.id % 4) * 18.0) if p.promenade else (1030.0 + (p.id % 6) * 20.0)
 		if absf(p.x - shelter_x) > 0.001: p.direction = 1 if shelter_x > p.x else -1
 		p.x = move_toward(p.x, shelter_x, 22.0 * dt)
 		return
 	p.state = "walk"
-	p.mood = "下雨" if raining and not p.platform else "开心"
+	p.mood = "下雨" if raining and not p.platform else ["开心", "悠闲", "期待", "放松"][p.id % 4]
+	p.idle_due -= dt
+	if p.id >= 8 and p.idle_due <= 0.0:
+		p.state = "idle"
+		p.timer = 2.0 + (p.id % 3)
+		p.idle_due = 22.0 + (p.id % 5) * 4.0
+		p.mood = "休息"
+		return
 	var bus_phase := fposmod(seconds + 32.0, 70.0)
 	var train_phase := fposmod(seconds, 100.0)
 	var wants_bus: bool = p.id == 0 and bus_phase >= 14.0 and bus_phase < 33.0

@@ -4,6 +4,7 @@ const BACKDROP: Texture2D = preload("res://assets/city-clean.png")
 const APPROVED_BACKGROUND: Texture2D = preload("res://assets/shenzhen-no-sun.png")
 const METRO: Texture2D = preload("res://assets/metro.png")
 const WALK: Texture2D = preload("res://assets/manga-walk.png")
+const WALK_MORE: Texture2D = preload("res://assets/character-walk-more.png")
 const WALK_EXTRA: Texture2D = preload("res://assets/kyoto-star-walk.png")
 const VEHICLES: Texture2D = preload("res://assets/city-vehicles.png")
 const CLOUD: Texture2D = preload("res://assets/weather-cloud.png")
@@ -32,6 +33,7 @@ var _mode_select: OptionButton
 var _screen_font: SystemFont
 var walk_reversed: Texture2D
 var walk_extra_reversed: Texture2D
+var walk_more_reversed: Texture2D
 var vehicles_reversed: Texture2D
 var residents = Residents.new()
 
@@ -43,6 +45,7 @@ func _ready() -> void:
 	_load_display_mode()
 	walk_reversed = _flip_texture(WALK)
 	walk_extra_reversed = _flip_texture(WALK_EXTRA)
+	walk_more_reversed = _flip_texture(WALK_MORE)
 	vehicles_reversed = _flip_texture(VEHICLES)
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT_SECONDS
@@ -128,7 +131,7 @@ func _build_panel() -> void:
 	_mode_select.add_item("填充屏幕（保持比例，可能裁切）")
 	_mode_select.add_item("完整显示（保持比例，可能留边）")
 	_mode_select.add_item("拉伸铺满（可能变形）")
-	_mode_select.add_item("完整画面＋天空延展（推荐）")
+	_mode_select.add_item("城市放大（两侧少量裁切）")
 	_mode_select.select(_mode_index(display_mode))
 	_mode_select.item_selected.connect(_on_display_mode_selected)
 	column.add_child(_mode_select)
@@ -172,6 +175,7 @@ func _draw() -> void:
 	_draw_weather_sky(image_size)
 	_draw_ufo()
 	_draw_station_screens()
+	_draw_promenade_people()
 	_draw_people(true, false)
 	_draw_traffic(image_size)
 	_draw_people(true, true)
@@ -251,43 +255,79 @@ func _draw_station_screens() -> void:
 		draw_string(_screen_font, Vector2(x + 4, 614), "3号线 华新  " + clock, HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f9e9d1"))
 		draw_string(_screen_font, Vector2(x + 4, 628), _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f6bb73"))
 
+func _draw_promenade_people() -> void:
+	for person in residents.people:
+		if person.promenade and person.state != "onboard":
+			_draw_resident(person, 465.0, 0.78)
+
 func _draw_people(platform: bool, boarding_only: bool = false) -> void:
 	for person in residents.people:
-		if person.platform != platform or person.state == "onboard": continue
+		if person.platform != platform or person.promenade or person.state == "onboard": continue
 		if platform and ((person.state == "boarding") != boarding_only): continue
-		var y := 694.0 if platform else 559.0
+		var y: float = (692.0 + (person.id % 2) * 3.0) if platform else (555.0 + (person.id % 3) * 2.0)
 		if person.state == "boarding": y = lerpf(y, 675.0 if platform else 515.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
-		var phase := int(floor(person.walk_distance / 3.0)) % 4
-		_draw_person(Vector2(person.x, y), phase, person.direction, person.id, person.state)
-		if person.state == "greet":
-			draw_line(Vector2(person.x + person.direction * 4, y - 21), Vector2(person.x + person.direction * 11, y - 29), Color("edb69a"), 2.0)
-		if _is_raining() and not platform and person.umbrella:
-			_draw_umbrella(Vector2(person.x, y - 34))
-		if person.state == "greet" or fposmod(animation_time + person.id * 2.3, 18.0) < 2.5:
-			_draw_mood(Vector2(person.x, y - (52 if _is_raining() and person.umbrella else 39)), person.mood)
+		_draw_resident(person, y, 1.0)
 
-func _draw_person(pos: Vector2, phase: int, direction: int, variant: int, state: String) -> void:
-	var walking: bool = residents.people[variant].moving and (state == "walk" or state == "boarding" or state == "shelter")
-	var sheet: Texture2D = WALK_EXTRA if variant >= 4 else WALK
+func _draw_resident(person: Dictionary, y: float, scale: float) -> void:
+	var phase := int(floor(person.walk_distance / 3.0)) % 4
+	var pos := Vector2(person.x, y)
+	_draw_person(pos, phase, person, scale)
+	if person.state == "greet":
+		draw_line(pos + Vector2(person.direction * 4, -21) * scale, pos + Vector2(person.direction * 11, -29) * scale, Color("edb69a"), 2.0 * scale)
+	if _is_raining() and not person.platform and person.umbrella:
+		_draw_umbrella(pos + Vector2(0, -34 * scale), scale, person.id)
+	if person.state == "greet" or fposmod(animation_time + person.id * 2.3, 24.0) < 2.0:
+		_draw_mood(pos + Vector2(0, (-52.0 if _is_raining() and person.umbrella else -39.0) * scale), person.mood)
+
+func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) -> void:
+	var variant: int = person.id % 12
+	var walking: bool = person.moving and person.state in ["walk", "boarding", "shelter"]
+	var sheet: Texture2D = WALK if variant < 4 else (WALK_EXTRA if variant < 8 else WALK_MORE)
 	var cell := Vector2(sheet.get_width() / 4.0, sheet.get_height() / 4.0)
 	var frame := phase if walking else 0
 	var source := Rect2(frame * cell.x, (variant % 4) * cell.y, cell.x, cell.y)
 	var texture: Texture2D = sheet
-	if direction < 0:
-		texture = walk_extra_reversed if variant >= 4 else walk_reversed
+	if person.direction < 0:
+		texture = walk_reversed if variant < 4 else (walk_extra_reversed if variant < 8 else walk_more_reversed)
 		source.position.x = sheet.get_width() - source.end.x
-	var fade := clampf(residents.people[variant].timer / 2.0, 0.0, 1.0) if state == "boarding" else 1.0
-	draw_texture_rect_region(texture, Rect2(pos.x - 13, pos.y - 36, 27, 36), source, Color(1, 1, 1, fade))
+	var fade := clampf(person.timer / 2.0, 0.0, 1.0) if person.state == "boarding" else 1.0
+	# A small grounding shadow makes the walking layer sit on the pavement.
+	draw_ellipse_shadow(pos, scale, fade)
+	draw_texture_rect_region(texture, Rect2(pos.x - 13 * scale, pos.y - 36 * scale, 27 * scale, 36 * scale), source, Color(1, 1, 1, fade))
 
-func _draw_umbrella(pos: Vector2) -> void:
-	draw_line(pos + Vector2(0, 5), pos + Vector2(0, 18), Color("44334a"), 1.5)
-	draw_colored_polygon(PackedVector2Array([pos + Vector2(-14, 6), pos + Vector2(-10, -1), pos + Vector2(-4, -5), pos + Vector2(4, -5), pos + Vector2(10, -1), pos + Vector2(14, 6)]), Color("cc6c77"))
-	draw_line(pos + Vector2(-13, 6), pos + Vector2(13, 6), Color("f1bdab"), 1.0)
+func draw_ellipse_shadow(pos: Vector2, scale: float, opacity: float) -> void:
+	var points := PackedVector2Array([pos + Vector2(-8, -1) * scale, pos + Vector2(-5, -3) * scale, pos + Vector2(5, -3) * scale, pos + Vector2(8, -1) * scale, pos + Vector2(5, 1) * scale, pos + Vector2(-5, 1) * scale])
+	draw_colored_polygon(points, Color(0.03, 0.04, 0.08, 0.28 * opacity))
+
+func _draw_umbrella(pos: Vector2, scale: float, id: int) -> void:
+	var colors := [Color("cc6c77"), Color("648ba1"), Color("d1a066"), Color("a383ac")]
+	draw_line(pos + Vector2(0, 5) * scale, pos + Vector2(0, 18) * scale, Color("44334a"), 1.5 * scale)
+	var shape := PackedVector2Array([Vector2(-14, 6), Vector2(-10, -1), Vector2(-4, -5), Vector2(4, -5), Vector2(10, -1), Vector2(14, 6)])
+	for i in range(shape.size()): shape[i] = pos + shape[i] * scale
+	draw_colored_polygon(shape, colors[(id / 2) % colors.size()])
+	draw_line(pos + Vector2(-13, 6) * scale, pos + Vector2(13, 6) * scale, Color("f1bdab"), 1.0 * scale)
 
 func _draw_mood(pos: Vector2, mood: String) -> void:
-	draw_rect(Rect2(pos.x - 15, pos.y - 16, 31, 15), Color("f9ead4"))
-	draw_rect(Rect2(pos.x - 14, pos.y - 15, 29, 13), Color("fff8e9"))
-	draw_string(_screen_font, Vector2(pos.x - 11, pos.y - 4), mood, HORIZONTAL_ALIGNMENT_LEFT, 25, 10, Color("694651"))
+	# Draw a small coloured emoji so it remains visible without an emoji font.
+	var bubble := Rect2(pos.x - 11, pos.y - 21, 22, 20)
+	draw_rect(bubble.grow(1), Color("5e5365"))
+	draw_rect(bubble, Color("fff8e9"))
+	draw_colored_polygon(PackedVector2Array([Vector2(pos.x - 3, pos.y - 1), Vector2(pos.x + 3, pos.y - 1), Vector2(pos.x, pos.y + 3)]), Color("fff8e9"))
+	var center := pos + Vector2(0, -11)
+	draw_circle(center, 7.0, Color("ffd56b"))
+	draw_circle(center + Vector2(-3, -1), 1.0, Color("5b3f3c"))
+	draw_circle(center + Vector2(3, -1), 1.0, Color("5b3f3c"))
+	if mood in ["下雨", "避雨"]:
+		draw_line(center + Vector2(-3, 4), center + Vector2(3, 4), Color("76504b"), 1.0)
+		draw_circle(center + Vector2(6, -4), 1.6, Color("76b5d2"))
+	elif mood == "休息":
+		draw_line(center + Vector2(-3, 3), center + Vector2(3, 3), Color("76504b"), 1.0)
+	else:
+		draw_line(center + Vector2(-3, 2), center + Vector2(-1, 4), Color("76504b"), 1.0)
+		draw_line(center + Vector2(-1, 4), center + Vector2(2, 4), Color("76504b"), 1.0)
+		draw_line(center + Vector2(2, 4), center + Vector2(3, 2), Color("76504b"), 1.0)
+		if mood == "你好":
+			draw_circle(center + Vector2(6, -5), 2.0, Color("e97887"))
 
 func _draw_ufo() -> void:
 	var cycle := fposmod(animation_time, 240.0)
@@ -317,6 +357,10 @@ func _display_rect(view: Vector2, artwork: Vector2, mode: String) -> Rect2:
 	var factor := minf(view.x / artwork.x, view.y / artwork.y) if mode in ["fit", "sky"] else maxf(view.x / artwork.x, view.y / artwork.y)
 	var output := artwork * factor
 	if mode == "sky":
+		# Enlarge the scene by up to 20%, keeping the same scale on both axes.
+		# At 16:10 this trims about 8% from each side and reduces empty sky.
+		factor = minf(factor * 1.2, view.y / artwork.y)
+		output = artwork * factor
 		return Rect2(Vector2((view.x - output.x) / 2.0, view.y - output.y), output)
 	return Rect2((view - output) / 2.0, output)
 

@@ -97,7 +97,7 @@ try {
     }
     $displayMenu = [System.Windows.Forms.ToolStripMenuItem]::new('Display mode')
     [void]$menu.Items.Add($displayMenu)
-    foreach ($choice in @(@('Fill (crop)', 'fill'), @('Fit (letterbox)', 'fit'), @('Stretch', 'stretch'), @('Full scene + extended sky', 'sky'))) {
+    foreach ($choice in @(@('Fill (crop)', 'fill'), @('Fit (letterbox)', 'fit'), @('Stretch', 'stretch'), @('Enlarged scene (slight crop)', 'sky'))) {
         $item = [System.Windows.Forms.ToolStripMenuItem]::new($choice[0])
         $item.Tag = $choice[1]
         $item.add_Click({
