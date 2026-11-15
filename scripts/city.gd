@@ -1,15 +1,13 @@
 extends Node2D
 
-const BACKDROP: Texture2D = preload("res://assets/city-empty.png")
+const BACKDROP: Texture2D = preload("res://assets/city-clean.png")
 const APPROVED_BACKGROUND: Texture2D = preload("res://assets/shenzhen-reference.png")
-const BUS: Texture2D = preload("res://assets/bus.png")
-const CAR: Texture2D = preload("res://assets/car.png")
 const METRO: Texture2D = preload("res://assets/metro.png")
-const PEOPLE: Texture2D = preload("res://assets/manga-pedestrians.png")
-const PEOPLE_EXTRA: Texture2D = preload("res://assets/kyoto-star-characters.png")
-const RIGHT_ENTRANCE: Texture2D = preload("res://assets/right-entrance.png")
-const BUS_SOURCE := Rect2(59, 51, 2072, 626)
-const CAR_SOURCE := Rect2(58, 36, 2064, 675)
+const WALK: Texture2D = preload("res://assets/manga-walk.png")
+const WALK_EXTRA: Texture2D = preload("res://assets/kyoto-star-walk.png")
+const VEHICLES: Texture2D = preload("res://assets/city-vehicles.png")
+const UFO: Texture2D = preload("res://assets/ufo-cc0.png")
+const Residents = preload("res://scripts/residents.gd")
 const METRO_SOURCE := Rect2(9, 273, 2155, 216)
 const WEATHER_URL := "https://api.open-meteo.com/v1/forecast?latitude=22.5431&longitude=114.0579&current=temperature_2m,weather_code,is_day&timezone=Asia%2FShanghai"
 const CACHE_PATH := "user://weather.json"
@@ -25,16 +23,16 @@ var animation_time := 0.0
 var settings_timer := 0.0
 var display_mode := "fill"
 var settings_path := ""
-var bus_reversed: Texture2D
-var car_reversed: Texture2D
-var people_reversed: Texture2D
-var people_extra_reversed: Texture2D
 var panel_visible := true
 var _http: HTTPRequest
 var _panel: PanelContainer
 var _status_label: Label
 var _mode_select: OptionButton
 var _screen_font: SystemFont
+var walk_reversed: Texture2D
+var walk_extra_reversed: Texture2D
+var vehicles_reversed: Texture2D
+var residents = Residents.new()
 
 func _ready() -> void:
 	Engine.max_fps = 20
@@ -42,10 +40,9 @@ func _ready() -> void:
 	get_window().min_size = Vector2i(600, 200)
 	settings_path = OS.get_environment("APPDATA").path_join("PixelCity").path_join("display.cfg")
 	_load_display_mode()
-	bus_reversed = _flip_texture(BUS)
-	car_reversed = _flip_texture(CAR)
-	people_reversed = _flip_texture(PEOPLE)
-	people_extra_reversed = _flip_texture(PEOPLE_EXTRA)
+	walk_reversed = _flip_texture(WALK)
+	walk_extra_reversed = _flip_texture(WALK_EXTRA)
+	vehicles_reversed = _flip_texture(VEHICLES)
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT_SECONDS
 	add_child(_http)
@@ -74,6 +71,10 @@ func _capture_test() -> void:
 		capture_path = "user://preview-start.png"
 	else:
 		animation_time = 18.0
+	if OS.get_cmdline_user_args().has("--capture-rain"):
+		weather = {"code": 63}
+		residents.step(0.1, animation_time, true)
+		capture_path = "user://preview-rain.png"
 	queue_redraw()
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
@@ -135,6 +136,7 @@ func _build_panel() -> void:
 func _process(delta: float) -> void:
 	elapsed += delta
 	animation_time += delta
+	residents.step(delta, animation_time, _is_raining())
 	settings_timer += delta
 	time_until_refresh -= delta
 	queue_redraw()
@@ -159,9 +161,11 @@ func _draw() -> void:
 	draw_texture_rect_region(APPROVED_BACKGROUND, skyline, skyline)
 	# Replace the opaque, painted-in shelter with matching street before traffic.
 	draw_texture_rect_region(BACKDROP, Rect2(990, 470, 190, 94), Rect2(700, 470, 190, 94))
+	_draw_ufo()
 	_draw_station_screens()
-	_draw_people(true)
+	_draw_people(true, false)
 	_draw_traffic(image_size)
+	_draw_people(true, true)
 	_draw_foreground()
 	_draw_people(false)
 	_draw_street_lights(Time.get_datetime_dict_from_system())
@@ -202,28 +206,50 @@ func _draw_station_screens() -> void:
 		draw_string(_screen_font, Vector2(x + 4, 614), "3号线 华新  " + clock, HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f9e9d1"))
 		draw_string(_screen_font, Vector2(x + 4, 628), _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f6bb73"))
 
-func _draw_people(platform: bool) -> void:
-	var count := 5 if platform else 8
-	for i in range(count):
-		var length := 1350.0 if platform else 1500.0
-		var speed := 13.0 + (i % 3) * 2.0
-		var direction := 1 if i % 2 == 0 else -1
-		var progress := fposmod(animation_time * speed + i * 231.0, length)
-		var x := 410.0 + (progress if direction == 1 else length - progress)
+func _draw_people(platform: bool, boarding_only: bool = false) -> void:
+	for person in residents.people:
+		if person.platform != platform or person.state == "onboard": continue
+		if platform and ((person.state == "boarding") != boarding_only): continue
 		var y := 694.0 if platform else 559.0
-		var phase := int(floor(animation_time * 5.0 + i)) % 4
-		_draw_person(Vector2(round(x), y), phase, direction, i)
+		if person.state == "boarding": y = lerpf(y, 675.0 if platform else 515.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+		var phase := int(floor(animation_time * 5.0 + person.id)) % 4
+		_draw_person(Vector2(round(person.x), y), phase, person.direction, person.id, person.state)
+		if person.state == "greet":
+			draw_line(Vector2(person.x + person.direction * 4, y - 21), Vector2(person.x + person.direction * 11, y - 29), Color("edb69a"), 2.0)
+		if _is_raining() and not platform and person.umbrella:
+			_draw_umbrella(Vector2(person.x, y - 34))
+		if person.state == "greet" or fposmod(animation_time + person.id * 2.3, 18.0) < 2.5:
+			_draw_mood(Vector2(person.x, y - (52 if _is_raining() and person.umbrella else 39)), person.mood)
 
-func _draw_person(pos: Vector2, phase: int, direction: int, variant: int) -> void:
-	# One pose per character; alternating bob provides an interim walking motion.
-	var column := variant % 4
-	var source := Rect2(column * 543, 0, 543, 724)
-	var texture: Texture2D = PEOPLE_EXTRA if variant % 8 >= 4 else PEOPLE
+func _draw_person(pos: Vector2, phase: int, direction: int, variant: int, state: String) -> void:
+	var walking: bool = state == "walk" or state == "boarding" or state == "shelter"
+	var sheet: Texture2D = WALK_EXTRA if variant >= 4 else WALK
+	var cell := Vector2(sheet.get_width() / 4.0, sheet.get_height() / 4.0)
+	var frame := phase if walking else 0
+	var source := Rect2(frame * cell.x, (variant % 4) * cell.y, cell.x, cell.y)
+	var texture: Texture2D = sheet
 	if direction < 0:
-		texture = people_extra_reversed if variant % 8 >= 4 else people_reversed
-		source.position.x = 2172 - source.position.x - source.size.x
-	var bounce := 1 if phase % 2 == 1 else 0
-	draw_texture_rect_region(texture, Rect2(pos.x - 13, pos.y - 38 - bounce, 27, 38), source)
+		texture = walk_extra_reversed if variant >= 4 else walk_reversed
+		source.position.x = sheet.get_width() - source.end.x
+	var fade := clampf(residents.people[variant].timer / 2.0, 0.0, 1.0) if state == "boarding" else 1.0
+	draw_texture_rect_region(texture, Rect2(pos.x - 13, pos.y - 36, 27, 36), source, Color(1, 1, 1, fade))
+
+func _draw_umbrella(pos: Vector2) -> void:
+	draw_line(pos + Vector2(0, 5), pos + Vector2(0, 18), Color("44334a"), 1.5)
+	draw_colored_polygon(PackedVector2Array([pos + Vector2(-14, 6), pos + Vector2(-10, -1), pos + Vector2(-4, -5), pos + Vector2(4, -5), pos + Vector2(10, -1), pos + Vector2(14, 6)]), Color("cc6c77"))
+	draw_line(pos + Vector2(-13, 6), pos + Vector2(13, 6), Color("f1bdab"), 1.0)
+
+func _draw_mood(pos: Vector2, mood: String) -> void:
+	draw_rect(Rect2(pos.x - 15, pos.y - 16, 31, 15), Color("f9ead4"))
+	draw_rect(Rect2(pos.x - 14, pos.y - 15, 29, 13), Color("fff8e9"))
+	draw_string(_screen_font, Vector2(pos.x - 11, pos.y - 4), mood, HORIZONTAL_ALIGNMENT_LEFT, 25, 10, Color("694651"))
+
+func _draw_ufo() -> void:
+	var cycle := fposmod(animation_time, 240.0)
+	if cycle >= 16.0: return
+	var x := lerpf(-50.0, 2200.0, cycle / 16.0)
+	var frame := int(animation_time * 6.0) % 4
+	draw_texture_rect_region(UFO, Rect2(x, 95 + sin(animation_time * 2.0) * 5.0, 38, 24), Rect2(frame * 32, 0, 32, 32))
 
 func _light_strength(now: Dictionary) -> float:
 	var seconds := int(now.hour) * 3600 + int(now.minute) * 60 + int(now.second)
@@ -295,46 +321,14 @@ func _draw_traffic(bounds: Vector2) -> void:
 	var near_bus_x := _bus_x(animation_time + 32.0, bounds.x, true)
 	var near_car_x := bounds.x - fposmod(animation_time * 41.0 + 1320.0, bounds.x + 210.0)
 	# Paint by wheel baseline: a nearer vehicle occludes a farther one.
-	_draw_pixel_car(Rect2(far_car_x, 457, 80, 27), bounds, false)
-	_draw_pixel_bus(Rect2(far_bus_x, 437, 185, 56), bounds, false)
-	_draw_pixel_car(Rect2(near_car_x, 495, 80, 26), bounds, true)
-	_draw_pixel_bus(Rect2(near_bus_x, 480, 170, 47), bounds, true)
+	_draw_vehicle(VEHICLES, Rect2(1285, 320, 875, 320), Rect2(far_car_x, 457, 80, 27), bounds)
+	_draw_vehicle(VEHICLES, Rect2(10, 140, 1235, 495), Rect2(far_bus_x, 437, 185, 56), bounds)
+	_draw_vehicle(vehicles_reversed, Rect2(1285, 320, 875, 320), Rect2(near_car_x, 495, 80, 26), bounds, true)
+	_draw_vehicle(vehicles_reversed, Rect2(10, 140, 1235, 495), Rect2(near_bus_x, 480, 170, 47), bounds, true)
 	# This is a visual simulation, not a live transit position or timetable.
 	# The wheel baseline must coincide with the foreground rails, below the
 	# platform floor rather than on the passenger walking surface.
 	_draw_vehicle(METRO, METRO_SOURCE, Rect2(_train_x(animation_time, bounds.x), 658, 660, 51), bounds)
-
-func _vehicle_part(target: Rect2, part: Rect2, color: Color, bounds: Vector2, reversed: bool) -> void:
-	var px := 1.0 - part.position.x - part.size.x if reversed else part.position.x
-	var rect := Rect2(target.position + Vector2(px, part.position.y) * target.size, part.size * target.size)
-	var clipped := rect.intersection(Rect2(Vector2.ZERO, bounds))
-	if clipped.has_area(): draw_rect(clipped, color)
-
-func _draw_pixel_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
-	_vehicle_part(target, Rect2(0.03, 0.84, 0.94, 0.12), Color(0.04, 0.06, 0.11, 0.38), bounds, reversed)
-	_vehicle_part(target, Rect2(0.03, 0.15, 0.91, 0.66), Color("26354c"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.06, 0.20, 0.86, 0.51), Color("eac7a1"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.07, 0.43, 0.84, 0.16), Color("b84d51"), bounds, reversed)
-	for i in range(5):
-		_vehicle_part(target, Rect2(0.10 + i * 0.135, 0.24, 0.10, 0.21), Color("42637a"), bounds, reversed)
-		_vehicle_part(target, Rect2(0.11 + i * 0.135, 0.25, 0.075, 0.035), Color("8db2b8"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.79, 0.23, 0.09, 0.22), Color("42637a"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.91, 0.54, 0.035, 0.09), Color("ffd88a"), bounds, reversed)
-	for x in [0.18, 0.73]:
-		_vehicle_part(target, Rect2(x, 0.70, 0.12, 0.22), Color("1b2637"), bounds, reversed)
-		_vehicle_part(target, Rect2(x + 0.035, 0.75, 0.05, 0.10), Color("93a0a4"), bounds, reversed)
-
-func _draw_pixel_car(target: Rect2, bounds: Vector2, reversed: bool) -> void:
-	_vehicle_part(target, Rect2(0.04, 0.80, 0.92, 0.15), Color(0.04, 0.06, 0.11, 0.4), bounds, reversed)
-	_vehicle_part(target, Rect2(0.20, 0.16, 0.52, 0.45), Color("26354c"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.24, 0.22, 0.18, 0.26), Color("8fb5ba"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.46, 0.22, 0.20, 0.26), Color("8fb5ba"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.05, 0.49, 0.89, 0.30), Color("c57767"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.08, 0.52, 0.80, 0.06), Color("e8ae91"), bounds, reversed)
-	_vehicle_part(target, Rect2(0.88, 0.54, 0.06, 0.08), Color("ffdfa1"), bounds, reversed)
-	for x in [0.18, 0.70]:
-		_vehicle_part(target, Rect2(x, 0.70, 0.14, 0.23), Color("202a3b"), bounds, reversed)
-		_vehicle_part(target, Rect2(x + 0.04, 0.75, 0.06, 0.10), Color("aab2b0"), bounds, reversed)
 
 func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
 	# Each loop includes an approach, a short stop, and a departure.
@@ -357,7 +351,7 @@ func _draw_foreground() -> void:
 		draw_texture_rect_region(BACKDROP, region, region)
 	# Only use the corrected right entrance patch; the approved skyline is unchanged.
 	var right_region := Rect2(1755, 470, 417, 94)
-	draw_texture_rect_region(RIGHT_ENTRANCE, right_region, right_region)
+	draw_texture_rect_region(BACKDROP, right_region, right_region)
 	_draw_bus_shelter()
 
 func _draw_bus_shelter() -> void:
