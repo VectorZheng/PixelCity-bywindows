@@ -24,6 +24,9 @@ func _initialize() -> void:
 	assert(is_equal_approx(city._train_x(30.0, image_size.x), 750.0))
 	assert(city._train_x(50.0, image_size.x) > 750.0)
 	assert(city._train_x(70.0, image_size.x) < 0.0)
+	assert(is_equal_approx(city._bus_x(25.0, image_size.x, false), city._bus_x(32.0, image_size.x, false)))
+	assert(city._bus_x(40.0, image_size.x, false) > city._bus_x(33.0, image_size.x, false))
+	assert(city._bus_x(40.0, image_size.x, true) < city._bus_x(33.0, image_size.x, true))
 	var portrait: Rect2 = city._display_rect(Vector2(1080, 1920), image_size, "fit")
 	assert(is_equal_approx(portrait.size.x, 1080.0) and is_equal_approx(portrait.size.y, 360.0))
 	city.settings_path = "user://smoke-display.cfg"

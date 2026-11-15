@@ -148,6 +148,8 @@ func _draw() -> void:
 	# Keep the user's approved sky and skyline from the original image.
 	var skyline := Rect2(0, 0, image_size.x, 429)
 	draw_texture_rect_region(APPROVED_BACKGROUND, skyline, skyline)
+	# Replace the opaque, painted-in shelter with matching street before traffic.
+	draw_texture_rect_region(BACKDROP, Rect2(990, 470, 190, 94), Rect2(700, 470, 190, 94))
 	_draw_traffic(image_size)
 	_draw_foreground()
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -221,9 +223,9 @@ func _draw_vehicle(texture: Texture2D, source: Rect2, target: Rect2, bounds: Vec
 	draw_texture_rect_region(texture, clipped, clipped_source)
 
 func _draw_traffic(bounds: Vector2) -> void:
-	var far_bus_x := fposmod(animation_time * 48.0 + 620.0, bounds.x + 210.0) - 210.0
+	var far_bus_x := _bus_x(animation_time + 8.0, bounds.x, false)
 	var far_car_x := fposmod(animation_time * 48.0 + 1250.0, bounds.x + 210.0) - 210.0
-	var near_bus_x := bounds.x - fposmod(animation_time * 41.0 + 700.0, bounds.x + 210.0)
+	var near_bus_x := _bus_x(animation_time + 32.0, bounds.x, true)
 	var near_car_x := bounds.x - fposmod(animation_time * 41.0 + 1320.0, bounds.x + 210.0)
 	_draw_vehicle(BUS, BUS_SOURCE, Rect2(far_bus_x, 437, 185, 56), bounds)
 	_draw_vehicle(CAR, CAR_SOURCE, Rect2(far_car_x, 457, 80, 27), bounds)
@@ -234,24 +236,58 @@ func _draw_traffic(bounds: Vector2) -> void:
 	# platform floor rather than on the passenger walking surface.
 	_draw_vehicle(METRO, METRO_SOURCE, Rect2(_train_x(animation_time, bounds.x), 658, 660, 51), bounds)
 
+func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
+	# Each loop includes an approach, a short stop, and a departure.
+	var cycle := fposmod(seconds, 70.0)
+	var distance: float
+	if cycle < 25.0:
+		var t := cycle / 25.0
+		distance = lerpf(-210.0, scene_width * 0.5 - 90.0, 1.0 - pow(1.0 - t, 2.0))
+	elif cycle < 33.0:
+		distance = scene_width * 0.5 - 90.0
+	else:
+		var t := (cycle - 33.0) / 37.0
+		distance = lerpf(scene_width * 0.5 - 90.0, scene_width + 210.0, t * t)
+	return scene_width - distance - 185.0 if reversed else distance
+
 func _draw_foreground() -> void:
 	# Draw the street-side structures in front of traffic; cars must not pass over
 	# a station entrance or the back of the near-side bus shelter.
-	for region in [Rect2(0, 470, 420, 94), Rect2(990, 470, 190, 94)]:
+	for region in [Rect2(0, 470, 420, 94)]:
 		draw_texture_rect_region(BACKDROP, region, region)
 	# Only use the corrected right entrance patch; the approved skyline is unchanged.
 	var right_region := Rect2(1755, 470, 417, 94)
 	draw_texture_rect_region(RIGHT_ENTRANCE, right_region, right_region)
+	_draw_bus_shelter()
+
+func _draw_bus_shelter() -> void:
+	# The panes are transparent so the road remains visible through the shelter.
+	var frame := Color("283047")
+	var edge := Color("596073")
+	draw_rect(Rect2(1000, 485, 170, 68), Color(0.15, 0.23, 0.34, 0.28))
+	draw_colored_polygon(PackedVector2Array([Vector2(990, 485), Vector2(1000, 475), Vector2(1170, 475), Vector2(1180, 485)]), frame)
+	draw_rect(Rect2(994, 483, 182, 4), edge)
+	for x in [1000, 1056, 1112, 1168]:
+		draw_rect(Rect2(x, 486, 4, 70), frame)
+	draw_rect(Rect2(998, 553, 174, 4), frame)
+	draw_rect(Rect2(1024, 538, 52, 4), Color("b97759"))
+	draw_rect(Rect2(1030, 542, 3, 10), frame)
+	draw_rect(Rect2(1068, 542, 3, 10), frame)
+	draw_rect(Rect2(1134, 492, 21, 16), frame)
+	draw_rect(Rect2(1137, 495, 15, 2), Color("e2a779"))
+	draw_rect(Rect2(1137, 500, 11, 2), Color("b5b8b7"))
 
 func _train_x(seconds: float, scene_width: float) -> float:
 	var cycle := fposmod(seconds, 100.0)
 	var train_x := -680.0
 	if cycle < 19.0:
-		train_x = lerpf(-680.0, 750.0, cycle / 19.0)
+		var progress := cycle / 19.0
+		train_x = lerpf(-680.0, 750.0, 1.0 - pow(1.0 - progress, 2.0))
 	elif cycle < 42.0:
 		train_x = 750.0
 	elif cycle < 61.0:
-		train_x = lerpf(750.0, scene_width, (cycle - 42.0) / 19.0)
+		var progress := (cycle - 42.0) / 19.0
+		train_x = lerpf(750.0, scene_width, progress * progress)
 	return train_x
 
 func _is_raining() -> bool:
