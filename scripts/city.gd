@@ -336,6 +336,17 @@ func _draw_extended_sky(view: Vector2, target: Rect2) -> void:
 			var x := fposmod(float(i * 193 + 51), view.x)
 			var y := fposmod(float(i * 107 + 21), maxf(target.position.y - 20.0, 1.0))
 			draw_circle(Vector2(x, y), 0.8, Color(1.0, 0.9, 0.86, 0.4))
+		# Atmospheric layers occupy the extended sky and drift at different speeds.
+		# The actual city stays at its original aspect ratio below them.
+		var heavy := _is_raining() or _is_snowing() or int(weather.get("code", -1)) == 3
+		var opacity := 0.32 if heavy else 0.20
+		for i in range(8):
+			var cloud_width := view.x * (0.30 + 0.08 * (i % 3))
+			var travel := view.x + cloud_width
+			var x := fposmod(view.x * (0.08 + 0.31 * i) + animation_time * (3.0 + i), travel) - cloud_width * 0.5
+			var y := target.position.y * (0.05 + 0.22 * (i % 3))
+			var height := minf(cloud_width / 3.0, target.position.y * 0.45)
+			_draw_vehicle(CLOUD, Rect2(Vector2.ZERO, CLOUD.get_size()), Rect2(x, y, cloud_width, height), view, false, Color(1.0, 0.91, 0.94, opacity))
 
 func _mode_index(mode: String) -> int:
 	return ["fill", "fit", "stretch", "sky"].find(mode) if mode in ["fill", "fit", "stretch", "sky"] else 0
