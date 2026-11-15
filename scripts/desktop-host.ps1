@@ -83,21 +83,49 @@ try {
     $insertAfter = if ([DesktopHostNative]::Modern) { [DesktopHostNative]::IconLayer } else { [IntPtr]::Zero }
     if (-not [DesktopHostNative]::SetWindowPos($window, $insertAfter, 0, 0, $screen.Width, $screen.Height, 0x0050)) { throw 'Failed to size wallpaper window.' }
     $attached = $true
-    if ($Test) {
-        Start-Sleep -Seconds 3
-        $process.Refresh()
-        if ($process.HasExited -or [DesktopHostNative]::GetParent($window) -ne $layer) { throw 'Wallpaper did not remain attached.' }
-        Write-Output 'WALLPAPER_ATTACH_TEST_PASSED'
-        return
-    }
     $tray = [System.Windows.Forms.NotifyIcon]::new()
     $tray.Icon = [System.Drawing.SystemIcons]::Application
     $tray.Text = 'Shenzhen Pixel City'
     $menu = [System.Windows.Forms.ContextMenuStrip]::new()
+    $displayDirectory = Join-Path $env:APPDATA 'PixelCity'
+    $displayFile = Join-Path $displayDirectory 'display.cfg'
+    if ($Test) {
+        $displayDirectory = [System.IO.Path]::GetTempPath()
+        $displayFile = Join-Path $displayDirectory ('PixelCity-test-' + [Guid]::NewGuid().ToString('N') + '.cfg')
+    }
+    $displayMenu = [System.Windows.Forms.ToolStripMenuItem]::new('Display mode')
+    [void]$menu.Items.Add($displayMenu)
+    foreach ($choice in @(@('Fill (crop)', 'fill'), @('Fit (letterbox)', 'fit'), @('Stretch', 'stretch'))) {
+        $item = [System.Windows.Forms.ToolStripMenuItem]::new($choice[0])
+        $item.Tag = $choice[1]
+        $item.add_Click({
+            param($sender, $eventArgs)
+            try {
+                [void][System.IO.Directory]::CreateDirectory($displayDirectory)
+                $content = '[display]' + [Environment]::NewLine + 'mode="' + $sender.Tag + '"' + [Environment]::NewLine
+                [System.IO.File]::WriteAllText($displayFile, $content, [System.Text.Encoding]::UTF8)
+            } catch {
+                [System.Windows.Forms.MessageBox]::Show('Unable to save display mode.', 'Shenzhen Pixel City') | Out-Null
+            }
+        })
+        [void]$displayMenu.DropDownItems.Add($item)
+    }
     $exitItem = $menu.Items.Add('Exit wallpaper')
     $exitItem.add_Click({ [System.Windows.Forms.Application]::Exit() })
     $tray.ContextMenuStrip = $menu
     $tray.Visible = $true
+    if ($Test) {
+        $displayMenu.DropDownItems[1].PerformClick()
+        if (-not [System.IO.File]::Exists($displayFile) -or -not ([System.IO.File]::ReadAllText($displayFile).Contains('mode="fit"'))) {
+            throw 'Display mode menu did not save the chosen setting.'
+        }
+        [System.IO.File]::Delete($displayFile)
+        Start-Sleep -Seconds 3
+        $process.Refresh()
+        if ($process.HasExited -or [DesktopHostNative]::GetParent($window) -ne $layer) { throw 'Wallpaper did not remain attached.' }
+        Write-Output 'WALLPAPER_ATTACH_AND_MENU_TEST_PASSED'
+        return
+    }
     $timer = [System.Windows.Forms.Timer]::new()
     $timer.Interval = 3000
     $timer.add_Tick({

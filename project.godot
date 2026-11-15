@@ -8,7 +8,7 @@ run/main_scene="res://main.tscn"
 [display]
 window/size/viewport_width=1500
 window/size/viewport_height=500
-window/stretch/mode="canvas_items"
+window/stretch/mode="disabled"
 
 [rendering]
 renderer/rendering_method="gl_compatibility"
