@@ -1,0 +1,18 @@
+; Shenzhen pixel city desktop wallpaper prototype
+config_version=5
+
+[application]
+config/name="深圳像素城市"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=1500
+window/size/viewport_height=500
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+textures/canvas_textures/default_texture_filter=0
+environment/defaults/default_clear_color=Color(0.035, 0.055, 0.1, 1)

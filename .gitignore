@@ -1,0 +1,5 @@
+.godot/
+.tools/
+.learnings/
+设计效果图/*.import
+*.log
