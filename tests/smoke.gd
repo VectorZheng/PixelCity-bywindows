@@ -31,6 +31,22 @@ func _initialize() -> void:
 	assert(is_equal_approx(city._bus_x(25.0, image_size.x, false), city._bus_x(32.0, image_size.x, false)))
 	assert(city._bus_x(40.0, image_size.x, false) > city._bus_x(33.0, image_size.x, false))
 	assert(city._bus_x(40.0, image_size.x, true) < city._bus_x(33.0, image_size.x, true))
+	# Cars remain behind the bus in their own lane, including when the bus is stopped.
+	var stopped_bus: float = city._bus_x(26.0, image_size.x, false)
+	assert(is_equal_approx(city._lane_car_x(stopped_bus, image_size.x, false) - stopped_bus, -220.0))
+	var stopped_reverse: float = city._bus_x(26.0, image_size.x, true)
+	assert(is_equal_approx(city._lane_car_x(stopped_reverse, image_size.x, true) - stopped_reverse, 280.0))
+	assert(is_equal_approx(city._lane_car_x(city._bus_x(25.0, image_size.x, false), image_size.x, false), city._lane_car_x(city._bus_x(32.0, image_size.x, false), image_size.x, false)))
+	# Check the full cycle, including offscreen wrap, for visible overlap.
+	for frame in range(350):
+		for reversed in [false, true]:
+			var bus: float = city._bus_x(frame / 5.0, image_size.x, reversed)
+			var car: float = city._lane_car_x(bus, image_size.x, reversed)
+			var bus_width := 170.0 if reversed else 185.0
+			var bus_visible := bus < image_size.x and bus + bus_width > 0.0
+			var car_visible := car < image_size.x and car + 80.0 > 0.0
+			if bus_visible and car_visible:
+				assert(bus + bus_width <= car or car + 80.0 <= bus)
 	assert(city._train_status(0.0) == "模拟 列车进站")
 	assert(city._train_status(25.0) == "模拟 列车停站")
 	assert(city._train_status(50.0) == "模拟 列车驶离")

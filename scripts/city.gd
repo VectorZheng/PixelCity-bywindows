@@ -174,6 +174,7 @@ func _draw() -> void:
 	_draw_sun(Time.get_datetime_dict_from_system())
 	_draw_weather_sky(image_size)
 	_draw_ufo()
+	_draw_road_edges(image_size.x)
 	_draw_station_screens()
 	_draw_promenade_people()
 	_draw_people(true, false)
@@ -434,19 +435,52 @@ func _draw_vehicle(texture: Texture2D, source: Rect2, target: Rect2, bounds: Vec
 		clipped.size.y / target.size.y * source.size.y)
 	draw_texture_rect_region(texture, clipped, clipped_source, modulate)
 
+func _draw_road_edges(width: float) -> void:
+	# Two opposite one-way lanes are separated by the existing central barrier.
+	# Edge lines make each carriageway easier to read without covering that barrier.
+	draw_line(Vector2(0, 466), Vector2(width, 466), Color(0.95, 0.72, 0.46, 0.52), 1.2)
+	draw_line(Vector2(0, 535), Vector2(width, 535), Color(0.95, 0.72, 0.46, 0.52), 1.2)
+	for x in range(0, int(width), 125):
+		draw_line(Vector2(x, 469), Vector2(minf(x + 48, width), 469), Color(0.94, 0.83, 0.69, 0.48), 1.4)
+		draw_line(Vector2(x + 55, 532), Vector2(minf(x + 103, width), 532), Color(0.94, 0.83, 0.69, 0.48), 1.4)
+
+func _lane_car_x(bus_x: float, scene_width: float, reversed: bool) -> float:
+	# Each car follows its bus at a safe gap and stops behind it; both wrap offscreen.
+	var ring := scene_width + 420.0
+	if reversed:
+		return fposmod(bus_x + 280.0 + 395.0, ring) - 395.0
+	return fposmod(bus_x - 220.0 + 210.0, ring) - 210.0
+
+func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
+	var texture: Texture2D = vehicles_reversed if reversed else VEHICLES
+	_draw_vehicle(texture, Rect2(10, 140, 1235, 495), target, bounds, reversed)
+	# The sprite has fixed tyres; animated hub spokes track wheel travel, not time.
+	# Thus they turn in the correct direction and remain still while the bus waits.
+	var radius := target.size.y * 0.10
+	var angle := target.position.x / maxf(radius, 1.0)
+	for fraction in [0.219, 0.687]:
+		var fx: float = 1.0 - fraction if reversed else fraction
+		var center := target.position + Vector2(target.size.x * fx, target.size.y * 0.842)
+		if center.x < radius or center.x > bounds.x - radius: continue
+		draw_circle(center, radius * 0.72, Color("59626d"))
+		draw_circle(center, radius * 0.53, Color("a8adb0"))
+		for i in range(4):
+			var a := angle + i * PI / 2.0
+			var offset := Vector2(cos(a), sin(a)) * radius * 0.45
+			draw_line(center - offset, center + offset, Color("333e4b"), 1.0)
+		draw_circle(center, radius * 0.16, Color("263340"))
+
 func _draw_traffic(bounds: Vector2) -> void:
 	var far_bus_x := _bus_x(animation_time + 8.0, bounds.x, false)
-	var far_car_x := fposmod(animation_time * 48.0 + 1250.0, bounds.x + 210.0) - 210.0
 	var near_bus_x := _bus_x(animation_time + 32.0, bounds.x, true)
-	var near_car_x := bounds.x - fposmod(animation_time * 41.0 + 1320.0, bounds.x + 210.0)
-	# Paint by wheel baseline: a nearer vehicle occludes a farther one.
-	_draw_vehicle(VEHICLES, Rect2(1285, 320, 875, 320), Rect2(far_car_x, 457, 80, 27), bounds)
-	_draw_vehicle(VEHICLES, Rect2(10, 140, 1235, 495), Rect2(far_bus_x, 437, 185, 56), bounds)
-	_draw_vehicle(vehicles_reversed, Rect2(1285, 320, 875, 320), Rect2(near_car_x, 495, 80, 26), bounds, true)
-	_draw_vehicle(vehicles_reversed, Rect2(10, 140, 1235, 495), Rect2(near_bus_x, 480, 170, 47), bounds, true)
-	# This is a visual simulation, not a live transit position or timetable.
-	# The wheel baseline must coincide with the foreground rails, below the
-	# platform floor rather than on the passenger walking surface.
+	var far_car_x := _lane_car_x(far_bus_x, bounds.x, false)
+	var near_car_x := _lane_car_x(near_bus_x, bounds.x, true)
+	# Each direction has one wheel baseline; nearer lane is painted in front.
+	_draw_vehicle(VEHICLES, Rect2(1285, 320, 875, 320), Rect2(far_car_x, 463, 80, 27), bounds)
+	_draw_bus(Rect2(far_bus_x, 434, 185, 56), bounds, false)
+	_draw_vehicle(vehicles_reversed, Rect2(1285, 320, 875, 320), Rect2(near_car_x, 504, 80, 26), bounds, true)
+	_draw_bus(Rect2(near_bus_x, 483, 170, 47), bounds, true)
+	# Visual simulation: the train runs on the rails, not the walking surface.
 	_draw_vehicle(METRO, METRO_SOURCE, Rect2(_train_x(animation_time, bounds.x), 658, 660, 51), bounds)
 
 func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
