@@ -11,6 +11,14 @@ func _initialize() -> void:
 	assert(city._is_raining())
 	city.weather = {"code": 2}
 	assert(not city._is_raining())
+	city.weather_override = 63
+	assert(city._is_raining())
+	city.weather_override = 75
+	assert(city._is_snowing() and not city._is_raining())
+	city.weather_override = 45
+	assert(city._visual_weather_code() == 45)
+	city.weather_override = -1
+	assert(city._visual_weather_code() == 2)
 	var view := Vector2(1920, 1080)
 	var image_size := Vector2(2172, 724)
 	var fit: Rect2 = city._display_rect(view, image_size, "fit")
@@ -41,6 +49,19 @@ func _initialize() -> void:
 	var reverse_parked: float = city._bus_x(28.0, image_size.x, true)
 	assert(city._passing_lane_amount(city._car_x(66.0, image_size.x, true), reverse_parked, true) > 0.9)
 	assert(city._passing_lane_amount(city._car_x(72.0, image_size.x, true), reverse_parked, true) == 0.0)
+	var transit = load("res://scripts/transit.gd")
+	assert(is_zero_approx(transit.train_doors(19.0)))
+	assert(is_equal_approx(transit.train_doors(23.0), 1.0))
+	assert(is_zero_approx(transit.train_doors(40.0)))
+	assert(is_zero_approx(transit.bus_doors(25.0)))
+	assert(is_equal_approx(transit.bus_doors(28.0), 1.0))
+	assert(is_zero_approx(transit.bus_doors(33.0)))
+	for tick in range(1000):
+		var time := tick / 10.0
+		if transit.train_doors(time) > 0.0:
+			assert(is_equal_approx(transit.train_position(time, image_size.x), 750.0))
+		if transit.bus_doors(time) > 0.0:
+			assert(is_equal_approx(city._bus_x(time, image_size.x, false), city._bus_x(28.0, image_size.x, false)))
 	assert(city._train_status(0.0) == "模拟 列车进站")
 	assert(city._train_status(25.0) == "模拟 列车停站")
 	assert(city._train_status(50.0) == "模拟 列车驶离")

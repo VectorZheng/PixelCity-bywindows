@@ -27,7 +27,7 @@ func _initialize() -> void:
 	var original_x: float = shelter.x
 	sim.step(0.1, 10.0, true)
 	assert(shelter.state == "shelter" and shelter.mood == "避雨")
-	assert(absf(shelter.x - 1090.0) < absf(original_x - 1090.0))
+	assert(absf(shelter.x - 1028.0) < absf(original_x - 1028.0))
 	assert(sim.people[2].state == "walk" and sim.people[2].mood == "下雨")
 	sim.step(0.1, 11.0, false)
 	assert(shelter.state == "walk")
@@ -39,7 +39,7 @@ func _initialize() -> void:
 	assert(march.state == "greet" and kafka.state == "greet")
 	assert(march.mood == "你好" and kafka.cooldown > 0.0)
 	var bus: Dictionary = sim.people[0]
-	bus.x = 1060.0
+	bus.x = 1100.0
 	bus.state = "walk"
 	sim.step(0.1, 64.0, false)
 	assert(bus.state == "boarding")
@@ -48,7 +48,7 @@ func _initialize() -> void:
 	var train: Dictionary = sim.people[1]
 	train.x = 1040.0
 	train.state = "walk"
-	sim.step(0.1, 20.0, false)
+	sim.step(0.1, 22.0, false)
 	assert(train.state == "boarding")
 	# A delayed frame must advance the same walking distance as smaller steps.
 	var slow = Residents.new()
@@ -58,7 +58,7 @@ func _initialize() -> void:
 	assert(is_equal_approx(slow.people[2].x, smooth.people[2].x))
 	assert(is_equal_approx(slow.people[2].walk_distance, smooth.people[2].walk_distance))
 	var sheltered: Dictionary = slow.people[3]
-	sheltered.x = 1030.0 + (sheltered.id % 6) * 20.0
+	sheltered.x = 1028.0
 	slow.step(0.1, 5.0, true)
 	assert(not sheltered.moving)
 	var edge: Dictionary = slow.people[2]
@@ -73,5 +73,27 @@ func _initialize() -> void:
 	shore.state = "walk"
 	sim.step(0.1, 25.0, true)
 	assert(shore.state == "shelter" and shore.x < 900.0)
+	shore.x = 425.0
+	for i in range(10): sim.step(0.1, 25.1 + i * 0.1, true)
+	assert(shore.sit > 0.99)
+	# The commuter sits while waiting, stands and reaches the door when it opens.
+	var waiter_sim = Residents.new()
+	var waiter: Dictionary = waiter_sim.people[0]
+	waiter.x = 1046.0
+	for i in range(15): waiter_sim.step(0.1, 55.0 + i * 0.1, false)
+	assert(waiter.state == "wait_bus" and waiter.sit > 0.99)
+	var boarded := false
+	for i in range(150):
+		waiter_sim.step(0.1, 56.5 + i * 0.1, false)
+		if waiter.state == "boarding" or waiter.state == "onboard": boarded = true
+	assert(boarded)
+	# A passenger without an umbrella sits under the shelter and gets up after rain.
+	var rain_sim = Residents.new()
+	var rain_waiter: Dictionary = rain_sim.people[3]
+	rain_waiter.x = 1028.0
+	for i in range(10): rain_sim.step(0.1, 5.0 + i * 0.1, true)
+	assert(rain_waiter.state == "shelter" and rain_waiter.sit > 0.99)
+	for i in range(10): rain_sim.step(0.1, 7.0 + i * 0.1, false)
+	assert(is_zero_approx(rain_waiter.sit) and rain_waiter.state == "walk")
 	print("RESIDENT_TEST_PASSED")
 	quit(0)

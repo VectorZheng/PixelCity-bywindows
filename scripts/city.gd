@@ -12,6 +12,8 @@ const VEHICLES: Texture2D = preload("res://assets/city-vehicles.png")
 const CLOUD: Texture2D = preload("res://assets/weather-cloud.png")
 const UFO: Texture2D = preload("res://assets/ufo-cc0.png")
 const Residents = preload("res://scripts/residents.gd")
+const Transit = preload("res://scripts/transit.gd")
+const WeatherEffects = preload("res://addons/weather_fx/weather_fx.gd")
 const METRO_SOURCE := Rect2(9, 273, 2155, 216)
 const WEATHER_URL := "https://api.open-meteo.com/v1/forecast?latitude=22.5431&longitude=114.0579&current=temperature_2m,weather_code,is_day&timezone=Asia%2FShanghai"
 const CACHE_PATH := "user://weather.json"
@@ -20,6 +22,7 @@ const HTTP_TIMEOUT_SECONDS := 20.0
 
 var weather: Dictionary = {}
 var weather_status := "天气尚未更新"
+var weather_override := -1
 var request_in_flight := false
 var time_until_refresh := 0.0
 var elapsed := 0.0
@@ -37,6 +40,9 @@ var walk_sheets: Array[Texture2D] = [WALK, WALK_EXTRA, WALK_MORE, WALK_FOUR, WAL
 var walk_sheets_reversed: Array[Texture2D] = []
 var vehicles_reversed: Texture2D
 var residents = Residents.new()
+var rain_fx: WeatherFX
+var snow_fx: WeatherFX
+var fog_fx: WeatherFX
 
 func _ready() -> void:
 	Engine.max_fps = 60
@@ -55,6 +61,7 @@ func _ready() -> void:
 	_screen_font = SystemFont.new()
 	_screen_font.font_names = PackedStringArray(["Microsoft YaHei", "SimHei", "Arial"])
 	_build_panel()
+	_create_weather_effects()
 	if OS.get_cmdline_user_args().has("--capture-fit"):
 		display_mode = "fit"
 		_mode_select.select(_mode_index(display_mode))
@@ -86,8 +93,25 @@ func _capture_test() -> void:
 		capture_path = "user://preview-pass-near.png"
 	if OS.get_cmdline_user_args().has("--capture-rain"):
 		weather = {"code": 63}
+		_sync_weather_effects()
 		residents.step(0.1, animation_time, true)
 		capture_path = "user://preview-rain.png"
+	if OS.get_cmdline_user_args().has("--capture-snow"):
+		weather = {"code": 75}
+		_sync_weather_effects()
+		capture_path = "user://preview-snow.png"
+	if OS.get_cmdline_user_args().has("--capture-fog"):
+		weather = {"code": 45}
+		_sync_weather_effects()
+		capture_path = "user://preview-fog.png"
+	if OS.get_cmdline_user_args().has("--capture-wait"):
+		var person: Dictionary = residents.people[0]
+		person.x = 1046.0
+		person.state = "wait_bus"
+		person.sit = 1.0
+		person.moving = false
+		animation_time = 30.0
+		capture_path = "user://preview-wait.png"
 	queue_redraw()
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
@@ -95,6 +119,10 @@ func _capture_test() -> void:
 	var error := image.save_png(capture_path)
 	if error != OK:
 		push_error("Preview capture failed: %s" % error)
+	if OS.get_cmdline_user_args().has("--capture-motion"):
+		await get_tree().create_timer(0.4).timeout
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png("user://preview-motion-second.png")
 	get_tree().quit()
 
 func _configure_proxy() -> void:
@@ -141,6 +169,19 @@ func _build_panel() -> void:
 	_mode_select.select(_mode_index(display_mode))
 	_mode_select.item_selected.connect(_on_display_mode_selected)
 	column.add_child(_mode_select)
+	var weather_select := OptionButton.new()
+	weather_select.add_item("天气：实时数据", -1)
+	weather_select.add_item("天气演示：晴", 0)
+	weather_select.add_item("天气演示：雨", 63)
+	weather_select.add_item("天气演示：雪", 75)
+	weather_select.add_item("天气演示：雾", 45)
+	weather_select.add_item("天气演示：雷雨", 95)
+	weather_select.item_selected.connect(func(index: int) -> void:
+		weather_override = [-1, 0, 63, 75, 45, 95][index]
+		_sync_weather_effects()
+		_update_panel()
+		queue_redraw())
+	column.add_child(weather_select)
 	var help := Label.new()
 	help.text = "F1 隐藏 / 显示信息   F11 全屏   Esc 退出"
 	help.add_theme_color_override("font_color", Color(0.78, 0.8, 0.86))
@@ -151,6 +192,7 @@ func _process(delta: float) -> void:
 	elapsed += delta
 	animation_time += delta
 	residents.step(delta, animation_time, _is_raining())
+	_sync_weather_effects()
 	settings_timer += delta
 	time_until_refresh -= delta
 	queue_redraw()
@@ -195,19 +237,49 @@ func _draw() -> void:
 	var tint := _environment_tint(Time.get_datetime_dict_from_system())
 	if tint.a > 0.0:
 		draw_rect(Rect2(Vector2.ZERO, size), tint)
-	if _is_snowing():
-		var motion := float(Time.get_ticks_msec()) * 0.035
-		for i in range(65):
-			var x := fposmod(float(i * 173) + sin(motion * 0.02 + i) * 12.0, size.x)
-			var y := fposmod(float(i * 97) + motion, size.y * 0.78)
-			draw_circle(Vector2(x, y), 1.5, Color(0.92, 0.95, 1.0, 0.65))
-	if _is_raining():
-		# A small deterministic set of streaks keeps rain cheap at desktop scale.
-		var motion := float(Time.get_ticks_msec()) * 0.22
-		for i in range(85):
-			var x := fposmod(float(i * 173) + motion * 0.25, size.x)
-			var y := fposmod(float(i * 97) + motion, size.y * 0.72)
-			draw_line(Vector2(x, y), Vector2(x - 4.0, y + 10.0), Color(0.75, 0.83, 1.0, 0.32), 1.0)
+	_draw_lightning(size, target)
+
+func _draw_lightning(size: Vector2, target: Rect2) -> void:
+	if _visual_weather_code() not in [95, 96, 99]: return
+	var pulse := fposmod(animation_time, 19.0)
+	if pulse >= 0.22: return
+	var intensity := 0.12 * (1.0 - pulse / 0.22)
+	var ground_y := clampf(target.position.y + target.size.y * 535.0 / 724.0, 0.0, size.y)
+	draw_rect(Rect2(0, 0, size.x, ground_y), Color(0.75, 0.83, 1.0, intensity))
+	var x := size.x * 0.68
+	var top := maxf(0.0, target.position.y * 0.45)
+	var bolt := PackedVector2Array([Vector2(x, top), Vector2(x - 12, top + 28), Vector2(x + 4, top + 29), Vector2(x - 15, top + 60), Vector2(x - 4, top + 61), Vector2(x - 25, top + 88)])
+	draw_polyline(bolt, Color(0.86, 0.91, 1.0, 0.8), 2.0)
+
+func _create_weather_effects() -> void:
+	# Weather FX Free by heyheythere (CC BY 4.0); only Preview instantiates it.
+	rain_fx = WeatherEffects.add(self, "rain", {"density": 0.48, "fall_speed": 0.65, "wind": 0.18, "ground": 0.98, "splashes": 0.7, "pixel_size": 2})
+	snow_fx = WeatherEffects.add(self, "snow", {"density": 0.42, "fall_speed": 0.7, "pixel_size": 2})
+	fog_fx = WeatherEffects.add(self, "fog", {"density": 0.42, "ground_fog": 0.75, "pixel_size": 2})
+	_sync_weather_effects()
+
+func _sync_weather_effects() -> void:
+	if not rain_fx or not snow_fx or not fog_fx: return
+	var size := get_viewport_rect().size
+	var target := _display_rect(size, BACKDROP.get_size(), display_mode)
+	# Street is the exposed surface; don't let precipitation fall into the subway.
+	var ground_y := clampf(target.position.y + target.size.y * 535.0 / 724.0, 1.0, size.y)
+	var weather_size := Vector2(size.x, ground_y)
+	rain_fx.size = weather_size
+	snow_fx.size = weather_size
+	fog_fx.position = Vector2(0.0, ground_y * 0.45)
+	fog_fx.size = Vector2(size.x, ground_y * 0.55)
+	var code := _visual_weather_code()
+	var rain_density := 0.24 if code in [51, 53, 55, 56, 57] else (0.38 if code in [61, 63, 80, 81] else 0.52)
+	rain_fx.set_param(&"density", rain_density)
+	var scene_scale := target.size / BACKDROP.get_size()
+	var near_roof := Rect2(target.position + Vector2(990, 475) * scene_scale, Vector2(190, 82) * scene_scale)
+	var far_roof := Rect2(target.position + Vector2(380, 410) * scene_scale, Vector2(155, 56) * scene_scale)
+	rain_fx.set_param(&"shelter_a", Vector4(near_roof.position.x, near_roof.position.y, near_roof.end.x, near_roof.end.y))
+	rain_fx.set_param(&"shelter_b", Vector4(far_roof.position.x, far_roof.position.y, far_roof.end.x, far_roof.end.y))
+	rain_fx.visible = _is_raining()
+	snow_fx.visible = _is_snowing()
+	fog_fx.visible = code in [45, 48]
 
 func _environment_tint(now: Dictionary) -> Color:
 	var hour := float(now.hour) + float(now.minute) / 60.0 + float(now.second) / 3600.0
@@ -231,13 +303,13 @@ func _draw_sun(now: Dictionary) -> void:
 	if pos.x < 0.0: return
 	var hour := float(now.hour) + float(now.minute) / 60.0 + float(now.second) / 3600.0
 	var fade := minf(smoothstep(6.0, 6.5, hour), 1.0 - smoothstep(17.5, 18.0, hour))
-	var cover := 0.45 if _is_raining() else (0.7 if int(weather.get("code", -1)) == 3 else 1.0)
+	var cover := 0.45 if _is_raining() else (0.7 if _visual_weather_code() == 3 else 1.0)
 	for radius in [43, 33, 25]:
 		draw_circle(pos, radius, Color(1.0, 0.69, 0.38, fade * cover * 0.045))
 	draw_circle(pos, 20.0, Color(1.0, 0.91, 0.71, fade * cover * 0.9))
 
 func _draw_weather_sky(bounds: Vector2) -> void:
-	var code := int(weather.get("code", -1))
+	var code := _visual_weather_code()
 	if code not in [1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99]: return
 	var heavy := _is_raining() or _is_snowing() or code in [3, 45, 48]
 	var color := Color(0.72, 0.72, 0.78, 0.54) if heavy else Color(1.0, 0.93, 0.95, 0.38)
@@ -263,6 +335,10 @@ func _draw_station_screens() -> void:
 		draw_string(_screen_font, Vector2(x + 4, 628), _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f6bb73"))
 
 func _draw_promenade_people() -> void:
+	# A low bench on the waterfront stop gives rain shelter a visible destination.
+	draw_rect(Rect2(405, 446, 80, 3), Color("b97759"))
+	draw_rect(Rect2(414, 449, 3, 8), Color("283047"))
+	draw_rect(Rect2(473, 449, 3, 8), Color("283047"))
 	for person in residents.people:
 		if person.promenade and person.state != "onboard":
 			_draw_resident(person, 465.0, 0.78)
@@ -276,19 +352,19 @@ func _draw_people(platform: bool, boarding_only: bool = false) -> void:
 		_draw_resident(person, y, 1.0)
 
 func _draw_resident(person: Dictionary, y: float, scale: float) -> void:
-	var phase := int(floor(person.walk_distance / 3.0)) % 4
+	var phase := int(floor(person.walk_distance / 2.6)) % 4
 	var pos := Vector2(person.x, y)
 	_draw_person(pos, phase, person, scale)
 	if person.state == "greet":
 		draw_line(pos + Vector2(person.direction * 4, -21) * scale, pos + Vector2(person.direction * 11, -29) * scale, Color("edb69a"), 2.0 * scale)
-	if _is_raining() and not person.platform and person.umbrella:
+	if _is_raining() and not person.platform and person.umbrella and person.state != "wait_bus" and person.sit < 0.05:
 		_draw_umbrella(pos + Vector2(0, -34 * scale), scale, person.id)
 	if person.state == "greet" or fposmod(animation_time + person.id * 2.3, 24.0) < 2.0:
 		_draw_mood(pos + Vector2(0, (-52.0 if _is_raining() and person.umbrella else -39.0) * scale), person.mood)
 
 func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) -> void:
 	var variant: int = person.character_id
-	var walking: bool = person.moving and person.state in ["walk", "boarding", "shelter"]
+	var walking: bool = person.moving and person.state in ["walk", "boarding", "shelter", "wait_bus"]
 	var sheet_index := floori(float(variant) / 4.0)
 	var sheet: Texture2D = walk_sheets[sheet_index]
 	var cell := Vector2(sheet.get_width() / 4.0, sheet.get_height() / 4.0)
@@ -301,19 +377,60 @@ func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) ->
 	var fade := clampf(person.timer / 2.0, 0.0, 1.0) if person.state == "boarding" else 1.0
 	# A small grounding shadow makes the walking layer sit on the pavement.
 	draw_ellipse_shadow(pos, scale, fade)
-	draw_texture_rect_region(texture, Rect2(pos.x - 13 * scale, pos.y - 36 * scale, 27 * scale, 36 * scale), source, Color(1, 1, 1, fade))
+	if walking and person.sit <= 0.01:
+		# A short crossfade softens each frame change while preserving the pixel art.
+		var fraction := fposmod(person.walk_distance / 2.6, 1.0)
+		var blend := smoothstep(0.78, 1.0, fraction)
+		var next_frame := (frame + 1) % 4
+		var next_source := Rect2(next_frame * cell.x, (variant % 4) * cell.y, cell.x, cell.y)
+		if person.direction < 0: next_source.position.x = sheet.get_width() - next_source.end.x
+		var destination := Rect2(pos.x - 13 * scale, pos.y - 36 * scale, 27 * scale, 36 * scale)
+		draw_texture_rect_region(texture, destination, source, Color(1, 1, 1, fade * (1.0 - blend)))
+		if blend > 0.0: draw_texture_rect_region(texture, destination, next_source, Color(1, 1, 1, fade * blend))
+		return
+	if person.sit < 0.99:
+		draw_texture_rect_region(texture, Rect2(pos.x - 13 * scale, pos.y - 36 * scale, 27 * scale, 36 * scale), source, Color(1, 1, 1, fade * (1.0 - person.sit)))
+	if person.sit > 0.01:
+		# Crossfade into a seated pose while keeping the character's head and coat.
+		var body_source := source
+		body_source.size.y *= 0.70
+		var body_height := lerpf(25.2, 20.0, person.sit) * scale
+		var top: float = pos.y - 36.0 * scale + 4.0 * scale * person.sit + sin(animation_time * 2.0 + person.id) * 0.35 * scale * person.sit
+		draw_texture_rect_region(texture, Rect2(pos.x - 13 * scale, top, 27 * scale, body_height), body_source, Color(1, 1, 1, fade * person.sit))
+		var hip := Vector2(pos.x + 1.0 * scale, top + body_height - 2.0 * scale)
+		var knee := hip + Vector2(7.0 * person.direction, 2.0) * scale
+		var foot := Vector2(knee.x, pos.y - 2.0 * scale)
+		var trouser_colors := [Color("b96936"), Color("34445c"), Color("42556c"), Color("4d4160")]
+		var trousers: Color = trouser_colors[person.character_id % trouser_colors.size()]
+		trousers.a = fade * person.sit
+		draw_line(hip, knee, trousers, 3.5 * scale)
+		draw_line(knee, foot, trousers, 3.0 * scale)
+		draw_line(foot, foot + Vector2(4 * person.direction, 0) * scale, Color(0.12, 0.13, 0.18, fade * person.sit), 2.0 * scale)
 
 func draw_ellipse_shadow(pos: Vector2, scale: float, opacity: float) -> void:
 	var points := PackedVector2Array([pos + Vector2(-8, -1) * scale, pos + Vector2(-5, -3) * scale, pos + Vector2(5, -3) * scale, pos + Vector2(8, -1) * scale, pos + Vector2(5, 1) * scale, pos + Vector2(-5, 1) * scale])
 	draw_colored_polygon(points, Color(0.03, 0.04, 0.08, 0.28 * opacity))
 
 func _draw_umbrella(pos: Vector2, scale: float, id: int) -> void:
-	var colors := [Color("cc6c77"), Color("648ba1"), Color("d1a066"), Color("a383ac")]
-	draw_line(pos + Vector2(0, 5) * scale, pos + Vector2(0, 18) * scale, Color("44334a"), 1.5 * scale)
-	var shape := PackedVector2Array([Vector2(-14, 6), Vector2(-10, -1), Vector2(-4, -5), Vector2(4, -5), Vector2(10, -1), Vector2(14, 6)])
-	for i in range(shape.size()): shape[i] = pos + shape[i] * scale
-	draw_colored_polygon(shape, colors[(id / 2) % colors.size()])
-	draw_line(pos + Vector2(-13, 6) * scale, pos + Vector2(13, 6) * scale, Color("f1bdab"), 1.0 * scale)
+	# A rim, curved panels and ribs read better at the tiny on-screen scale.
+	var colors := [Color("c86572"), Color("59879a"), Color("cf9a55"), Color("9d7cab")]
+	var base: Color = colors[(id / 2) % colors.size()]
+	var shadow := base.darkened(0.34)
+	var edge := Color("493843")
+	var outline := PackedVector2Array([Vector2(-16, 7), Vector2(-14, 2), Vector2(-10, -4), Vector2(-5, -7), Vector2(0, -8), Vector2(5, -7), Vector2(10, -4), Vector2(14, 2), Vector2(16, 7), Vector2(10, 6), Vector2(5, 8), Vector2(0, 6), Vector2(-5, 8), Vector2(-10, 6)])
+	var fill := PackedVector2Array()
+	for point in outline: fill.append(pos + point * scale)
+	draw_colored_polygon(fill, edge)
+	var panel := PackedVector2Array([Vector2(-14, 5), Vector2(-11, 0), Vector2(-7, -4), Vector2(0, -6), Vector2(7, -4), Vector2(11, 0), Vector2(14, 5), Vector2(9, 4), Vector2(5, 6), Vector2(0, 4), Vector2(-5, 6), Vector2(-9, 4)])
+	var panel_points := PackedVector2Array()
+	for point in panel: panel_points.append(pos + point * scale)
+	draw_colored_polygon(panel_points, base)
+	draw_line(pos + Vector2(0, -6) * scale, pos + Vector2(-5, 5) * scale, shadow, 1.1 * scale)
+	draw_line(pos + Vector2(0, -6) * scale, pos + Vector2(5, 5) * scale, shadow, 1.1 * scale)
+	draw_line(pos + Vector2(-7, -2) * scale, pos + Vector2(-10, 2) * scale, base.lightened(0.35), 1.2 * scale)
+	draw_line(pos + Vector2(0, 5) * scale, pos + Vector2(0, 17) * scale, edge, 1.4 * scale)
+	draw_arc(pos + Vector2(2, 17) * scale, 2.0 * scale, 0.0, PI, 5, edge, 1.1 * scale)
+	draw_rect(Rect2(pos + Vector2(-1, -9) * scale, Vector2(2, 2) * scale), base.lightened(0.45))
 
 func _draw_mood(pos: Vector2, mood: String) -> void:
 	# Draw a small coloured emoji so it remains visible without an emoji font.
@@ -390,7 +507,7 @@ func _draw_extended_sky(view: Vector2, target: Rect2) -> void:
 			draw_circle(Vector2(x, y), 0.8, Color(1.0, 0.9, 0.86, 0.4))
 		# Atmospheric layers occupy the extended sky and drift at different speeds.
 		# The actual city stays at its original aspect ratio below them.
-		var heavy := _is_raining() or _is_snowing() or int(weather.get("code", -1)) == 3
+		var heavy := _is_raining() or _is_snowing() or _visual_weather_code() == 3
 		var opacity := 0.32 if heavy else 0.20
 		for i in range(8):
 			var cloud_width := view.x * (0.30 + 0.08 * (i % 3))
@@ -468,6 +585,9 @@ func _passing_lane_amount(car_x: float, bus_x: float, reversed: bool) -> float:
 func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 	var texture: Texture2D = vehicles_reversed if reversed else VEHICLES
 	_draw_vehicle(texture, Rect2(10, 140, 1235, 495), target, bounds, reversed)
+	var door_open: float = Transit.bus_doors(animation_time + (32.0 if reversed else 8.0))
+	var door_x := target.position.x + target.size.x * (0.65 if reversed else 0.35)
+	_draw_open_door(Rect2(door_x - 4.0 * door_open, target.position.y + target.size.y * 0.32, 8.0 * door_open, target.size.y * 0.45), bounds)
 	# The sprite has fixed tyres; animated hub spokes track wheel travel, not time.
 	# Thus they turn in the correct direction and remain still while the bus waits.
 	var radius := target.size.y * 0.10
@@ -497,7 +617,34 @@ func _draw_traffic(bounds: Vector2) -> void:
 	_draw_vehicle(vehicles_reversed, Rect2(1285, 320, 875, 320), Rect2(near_car_x, 504 - near_offset, 80, 26), bounds, true)
 	_draw_bus(Rect2(near_bus_x, 483, 170, 47), bounds, true)
 	# Visual simulation: the train runs on the rails, not the walking surface.
-	_draw_vehicle(METRO, METRO_SOURCE, Rect2(_train_x(animation_time, bounds.x), 658, 660, 51), bounds)
+	var train_target := Rect2(_train_x(animation_time, bounds.x), 658, 660, 51)
+	_draw_vehicle(METRO, METRO_SOURCE, train_target, bounds)
+	_draw_train_wheels(train_target, bounds)
+	var doors: float = Transit.train_doors(animation_time)
+	if doors > 0.0:
+		for fraction in [0.075, 0.205, 0.307, 0.444, 0.550, 0.690, 0.790]:
+			var x: float = train_target.position.x + train_target.size.x * fraction
+			_draw_open_door(Rect2(x - 5.0 * doors, 668, 10.0 * doors, 29), bounds)
+
+func _draw_train_wheels(target: Rect2, bounds: Vector2) -> void:
+	# Four-car bogies share travel distance, so they turn during approach and stop at the platform.
+	var angle := target.position.x / 3.0
+	for fraction in [0.044, 0.084, 0.195, 0.234, 0.283, 0.324, 0.434, 0.473, 0.518, 0.559, 0.672, 0.711, 0.765, 0.804, 0.921, 0.958]:
+		var center := target.position + Vector2(target.size.x * fraction, target.size.y * 0.88)
+		if center.x < 2.0 or center.x > bounds.x - 2.0: continue
+		draw_circle(center, 2.0, Color("3d4955"))
+		var spoke := Vector2(cos(angle), sin(angle)) * 1.5
+		draw_line(center - spoke, center + spoke, Color("a7abb0"), 0.8)
+
+func _draw_open_door(rect: Rect2, bounds: Vector2) -> void:
+	if rect.size.x < 0.2: return
+	var clipped := rect.intersection(Rect2(Vector2.ZERO, bounds))
+	if not clipped.has_area(): return
+	draw_rect(clipped, Color("1d2b3a"))
+	if rect.size.x > 3.0:
+		draw_line(Vector2(clipped.position.x + 1.0, clipped.position.y + 2.0), Vector2(clipped.position.x + 1.0, clipped.end.y - 3.0), Color("788995"), 1.0)
+		draw_line(Vector2(clipped.end.x - 1.0, clipped.position.y + 2.0), Vector2(clipped.end.x - 1.0, clipped.end.y - 3.0), Color("788995"), 1.0)
+		draw_line(Vector2(clipped.position.x, clipped.end.y - 2.0), Vector2(clipped.end.x, clipped.end.y - 2.0), Color("d9ae74"), 1.0)
 
 func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
 	# Each loop includes an approach, a short stop, and a departure.
@@ -533,33 +680,24 @@ func _draw_bus_shelter() -> void:
 	for x in [1000, 1056, 1112, 1168]:
 		draw_rect(Rect2(x, 486, 4, 70), frame)
 	draw_rect(Rect2(998, 553, 174, 4), frame)
-	draw_rect(Rect2(1024, 538, 52, 4), Color("b97759"))
-	draw_rect(Rect2(1030, 542, 3, 10), frame)
-	draw_rect(Rect2(1068, 542, 3, 10), frame)
+	draw_rect(Rect2(1018, 538, 82, 4), Color("b97759"))
+	draw_rect(Rect2(1028, 542, 3, 10), frame)
+	draw_rect(Rect2(1090, 542, 3, 10), frame)
 	draw_rect(Rect2(1134, 492, 21, 16), frame)
 	draw_rect(Rect2(1137, 495, 15, 2), Color("e2a779"))
 	draw_rect(Rect2(1137, 500, 11, 2), Color("b5b8b7"))
 
 func _train_x(seconds: float, scene_width: float) -> float:
-	var cycle := fposmod(seconds, 100.0)
-	var train_x := -680.0
-	if cycle < 19.0:
-		var progress := cycle / 19.0
-		train_x = lerpf(-680.0, 750.0, 1.0 - pow(1.0 - progress, 2.0))
-	elif cycle < 42.0:
-		train_x = 750.0
-	elif cycle < 61.0:
-		var progress := (cycle - 42.0) / 19.0
-		train_x = lerpf(750.0, scene_width, progress * progress)
-	return train_x
+	return Transit.train_position(seconds, scene_width)
+
+func _visual_weather_code() -> int:
+	return weather_override if weather_override >= 0 else int(weather.get("code", -1))
 
 func _is_snowing() -> bool:
-	return not weather.is_empty() and int(weather.code) in [71, 73, 75, 77, 85, 86]
+	return _visual_weather_code() in [71, 73, 75, 77, 85, 86]
 
 func _is_raining() -> bool:
-	if weather.is_empty():
-		return false
-	return int(weather.code) in [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]
+	return _visual_weather_code() in [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -637,4 +775,5 @@ func _update_panel() -> void:
 	var details := weather_status
 	if not weather.is_empty():
 		details = "%s  %.1f°C  ·  %s\n数据时间：%s（深圳）" % [_weather_name(int(weather.code)), float(weather.temperature), weather_status, str(weather.time).replace("T", " ")]
-	_status_label.text = "深圳像素城市  ·  本机时间\n%s\n%s\n车辆及班次为画面模拟" % [now, details]
+	var demonstration := "\n画面天气：%s（演示）" % _weather_name(weather_override) if weather_override >= 0 else ""
+	_status_label.text = "深圳像素城市  ·  本机时间\n%s\n%s%s\n车辆及班次为画面模拟" % [now, details, demonstration]

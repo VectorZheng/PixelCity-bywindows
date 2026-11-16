@@ -12,7 +12,8 @@ func _init() -> void:
 		people.append({"id": i, "character_id": i, "platform": platform, "promenade": promenade, "x": x,
 			"direction": 1 if i % 2 == 0 else -1, "state": "walk", "timer": 0.0,
 			"cooldown": 0.0, "umbrella": i % 2 == 0, "mood": "开心",
-			"walk_distance": 0.0, "moving": false, "idle_due": 8.0 + i * 3.7})
+			"walk_distance": 0.0, "moving": false, "idle_due": 8.0 + i * 3.7,
+			"sit": 0.0, "wait_cooldown": 0.0, "wait_at_stop": i == 0})
 
 func step(delta: float, seconds: float, raining: bool) -> void:
 	# Substep long frames rather than discarding elapsed time. Use the matching
@@ -38,10 +39,11 @@ func _step_once(dt: float, seconds: float, raining: bool) -> void:
 
 func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool) -> void:
 	p.cooldown = maxf(0.0, p.cooldown - dt)
+	p.wait_cooldown = maxf(0.0, p.wait_cooldown - dt)
 	if p.state in ["greet", "boarding", "onboard", "idle"]:
 		p.timer -= dt
 		if p.state == "boarding":
-			p.x = move_toward(p.x, 1060.0 if not p.platform else 1040.0, 24.0 * dt)
+			p.x = move_toward(p.x, 1100.0 if not p.platform else 1040.0, 16.0 * dt)
 		if p.timer <= 0.0:
 			if p.state == "boarding":
 				p.state = "onboard"
@@ -49,15 +51,38 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool) -> 
 			elif p.state == "onboard":
 				p.state = "walk"
 				p.x = 1110.0 if not p.platform else 1130.0
+				p.wait_cooldown = 30.0
 			else:
 				p.state = "walk"
+		return
+	var bus_phase := fposmod(seconds + 32.0, 70.0)
+	var train_phase := fposmod(seconds, 100.0)
+	var should_board: bool = p.id == 0 and bus_phase >= 24.0 and bus_phase < 31.0
+	# One commuter deliberately waits at the bus shelter; stand before boarding.
+	if p.wait_at_stop and p.wait_cooldown <= 0.0 and not should_board:
+		p.state = "wait_bus"
+		p.mood = "期待"
+		var seat_x := 1046.0
+		if absf(p.x - seat_x) > 0.5:
+			p.direction = 1 if seat_x > p.x else -1
+			p.x = move_toward(p.x, seat_x, 14.0 * dt)
+			p.sit = move_toward(p.sit, 0.0, 1.4 * dt)
+		else:
+			p.sit = move_toward(p.sit, 1.0, 1.4 * dt)
 		return
 	if raining and not p.platform and not p.umbrella:
 		p.state = "shelter"
 		p.mood = "避雨"
-		var shelter_x: float = (425.0 + (p.id % 4) * 18.0) if p.promenade else (1030.0 + (p.id % 6) * 20.0)
-		if absf(p.x - shelter_x) > 0.001: p.direction = 1 if shelter_x > p.x else -1
-		p.x = move_toward(p.x, shelter_x, 22.0 * dt)
+		var can_sit: bool = p.id in [3, 7, 9, 11, 13, 15]
+		var seat_locations := {3: 1028.0, 7: 1068.0, 9: 425.0, 11: 443.0, 13: 461.0, 15: 1088.0}
+		var shelter_x: float = float(seat_locations[p.id]) if can_sit else ((425.0 + (p.id % 4) * 18.0) if p.promenade else 1030.0 + (p.id % 6) * 20.0)
+		if absf(p.x - shelter_x) > 0.5: p.direction = 1 if shelter_x > p.x else -1
+		p.x = move_toward(p.x, shelter_x, 15.0 * dt)
+		p.sit = move_toward(p.sit, 1.0 if can_sit and absf(p.x - shelter_x) < 0.5 else 0.0, 1.4 * dt)
+		return
+	if p.sit > 0.0:
+		p.state = "stand_up"
+		p.sit = move_toward(p.sit, 0.0, 1.4 * dt)
 		return
 	p.state = "walk"
 	p.mood = "下雨" if raining and not p.platform else ["开心", "悠闲", "期待", "放松"][p.id % 4]
@@ -68,21 +93,19 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool) -> 
 		p.idle_due = 22.0 + (p.id % 5) * 4.0
 		p.mood = "休息"
 		return
-	var bus_phase := fposmod(seconds + 32.0, 70.0)
-	var train_phase := fposmod(seconds, 100.0)
 	var wants_bus: bool = p.id == 0 and bus_phase >= 14.0 and bus_phase < 33.0
 	var wants_train: bool = p.id == 1 and train_phase >= 8.0 and train_phase < 42.0
 	if wants_bus or wants_train:
-		var door := 1060.0 if wants_bus else 1040.0
+		var door := 1100.0 if wants_bus else 1040.0
 		if absf(p.x - door) > 0.001: p.direction = 1 if door > p.x else -1
-		p.x = move_toward(p.x, door, 25.0 * dt)
-		var stopped := (bus_phase >= 25.0 and bus_phase < 31.0) if wants_bus else (train_phase >= 19.0 and train_phase < 40.0)
+		p.x = move_toward(p.x, door, 18.0 * dt)
+		var stopped := (bus_phase >= 26.0 and bus_phase < 31.0) if wants_bus else (train_phase >= 21.0 and train_phase < 39.0)
 		if stopped and absf(p.x - door) < 18.0:
 			p.state = "boarding"
 			p.timer = 2.0
 			p.mood = "乘车"
 	else:
-		p.x += p.direction * (13.0 + float(p.id % 3) * 2.0) * dt
+		p.x += p.direction * (9.0 + float(p.id % 3) * 1.5) * dt
 		if p.x < 440.0 or p.x > 1730.0:
 			p.x = clampf(p.x, 440.0, 1730.0)
 			p.direction = -p.direction
