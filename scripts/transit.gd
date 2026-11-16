@@ -1,5 +1,8 @@
 extends RefCounted
 
+# Door centers of the six-car preview sprite, from rear to front.
+const TRAIN_DOOR_FRACTIONS := [0.086, 0.170, 0.247, 0.319, 0.396, 0.466, 0.542, 0.615, 0.691, 0.764, 0.840, 0.913]
+
 # Door intervals share the same simulated stop cycle as the on-screen vehicles.
 # The train runs on straight rails; easing models braking and acceleration rather
 # than importing a full track physics system for this fixed wallpaper scene.
@@ -20,6 +23,17 @@ static func train_doors(seconds: float) -> float:
 	if cycle < 22.0: return smoothstep(20.0, 22.0, cycle)
 	if cycle < 38.0: return 1.0
 	return 1.0 - smoothstep(38.0, 40.0, cycle)
+
+# Screen doors correspond to the twelve doors of the train when stopped.
+static func platform_door_centers() -> Array[float]:
+	var result: Array[float] = []
+	for fraction in TRAIN_DOOR_FRACTIONS: result.append(750.0 + fraction * 660.0)
+	return result
+
+static func platform_door_opening(seconds: float, center: float) -> float:
+	for door in platform_door_centers():
+		if absf(door - center) < 0.01: return train_doors(seconds)
+	return 0.0
 
 static func bus_doors(seconds: float) -> float:
 	var cycle := fposmod(seconds, 70.0)

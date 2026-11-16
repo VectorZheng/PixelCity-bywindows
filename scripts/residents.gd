@@ -3,6 +3,7 @@ extends RefCounted
 # Positions are in original artwork coordinates. The simulation remains independent
 # of rendering and can be stepped deterministically in tests.
 const Planner = preload("res://scripts/citizen_planner.gd")
+const METRO_DOOR_X := 1057.56
 const FAR_SHELTER_X := 600.0
 const FAR_DOOR_X := 700.0
 const FAR_BUS_X := 634.4
@@ -106,7 +107,7 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool, hou
 		if p.ride_elapsed > 20.0 and doors_open:
 			p.state = "alighting"
 			p.timer = 2.0
-			p.x = FAR_DOOR_X if p.vehicle == "far_bus" else (1100.0 if p.vehicle == "near_bus" else 1040.0)
+			p.x = FAR_DOOR_X if p.vehicle == "far_bus" else (1100.0 if p.vehicle == "near_bus" else METRO_DOOR_X)
 		return
 	if p.state == "alighting":
 		p.timer -= dt
@@ -121,7 +122,7 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool, hou
 	if p.state in ["greet", "boarding", "idle"]:
 		p.timer -= dt
 		if p.state == "boarding":
-			p.x = move_toward(p.x, FAR_DOOR_X if p.promenade else (1100.0 if not p.platform else 1040.0), 16.0 * dt)
+			p.x = move_toward(p.x, FAR_DOOR_X if p.promenade else (1100.0 if not p.platform else METRO_DOOR_X), 16.0 * dt)
 		if p.timer <= 0.0:
 			if p.state == "boarding":
 				p.vehicle = "metro" if p.platform else ("far_bus" if p.promenade else "near_bus")
@@ -193,7 +194,7 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool, hou
 	var wants_bus: bool = p.wait_at_stop and p.wait_cooldown <= 0.0 and bus_phase >= 14.0 and bus_phase < 33.0
 	var wants_train: bool = p.platform and p.wait_cooldown <= 0.0 and (p.id == 1 or p.trip_mode == "metro") and train_phase >= 8.0 and train_phase < 42.0
 	if wants_bus or wants_train:
-		var door := 1100.0 if wants_bus else 1040.0
+		var door := 1100.0 if wants_bus else METRO_DOOR_X
 		if absf(p.x - door) > 0.001: p.direction = 1 if door > p.x else -1
 		p.x = move_toward(p.x, door, 18.0 * dt)
 		var stopped := (bus_phase >= 26.0 and bus_phase < 31.0) if wants_bus else (train_phase >= 21.0 and train_phase < 39.0)

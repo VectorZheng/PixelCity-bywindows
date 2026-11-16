@@ -46,7 +46,7 @@ func _initialize() -> void:
 	for i in range(22): sim.step(0.1, 64.0, false)
 	assert(bus.state == "onboard")
 	var train: Dictionary = sim.people[1]
-	train.x = 1040.0
+	train.x = 1057.56
 	train.state = "walk"
 	sim.step(0.1, 22.0, false)
 	assert(train.state == "boarding")

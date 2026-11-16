@@ -2,7 +2,7 @@ extends Node2D
 
 const BACKDROP: Texture2D = preload("res://assets/city-clean.png")
 const APPROVED_BACKGROUND: Texture2D = preload("res://assets/shenzhen-no-sun.png")
-const METRO: Texture2D = preload("res://assets/metro.png")
+const METRO: Texture2D = preload("res://assets/shenzhen-metro3.png")
 const WALK: Texture2D = preload("res://assets/manga-walk.png")
 const WALK_FOUR: Texture2D = preload("res://assets/character-walk-four.png")
 const WALK_FIVE: Texture2D = preload("res://assets/character-walk-five.png")
@@ -22,7 +22,7 @@ const Residents = preload("res://scripts/residents.gd")
 const Transit = preload("res://scripts/transit.gd")
 const WeatherEffects = preload("res://addons/weather_fx/weather_fx.gd")
 const COMPACT_STATION_SHIFT := 400.0
-const METRO_SOURCE := Rect2(9, 273, 2155, 216)
+const METRO_SOURCE := Rect2(4, 277, 2164, 182)
 const WEATHER_URL := "https://api.open-meteo.com/v1/forecast?latitude=22.5431&longitude=114.0579&current=temperature_2m,weather_code,is_day&timezone=Asia%2FShanghai"
 const CACHE_PATH := "user://weather.json"
 const WEATHER_REFRESH_SECONDS := 1800.0
@@ -104,6 +104,12 @@ func _capture_test() -> void:
 	if OS.get_cmdline_user_args().has("--capture-entrance-right"):
 		animation_time = 43.5
 		capture_path = "user://preview-entrance-right.png"
+	if OS.get_cmdline_user_args().has("--capture-train-entry"):
+		animation_time = 15.0
+		capture_path = "user://preview-train-entry.png"
+	if OS.get_cmdline_user_args().has("--capture-train-leave"):
+		animation_time = 52.0
+		capture_path = "user://preview-train-leave.png"
 	if OS.get_cmdline_user_args().has("--capture-cars"):
 		animation_time = 23.4
 		capture_path = "user://preview-cars.png"
@@ -268,15 +274,13 @@ func _draw() -> void:
 		draw_texture_rect_region(BACKDROP, Rect2(1752, 470, 420, 94), Rect2(1250, 470, 420, 94))
 		_draw_escalator_wall_patches()
 	_draw_road_edges(image_size.x)
-	if station_shift > 0.01:
-		# Remove the old painted-on screens before placing the relocated ones.
-		for old_x in [630, 1444]:
-			draw_texture_rect_region(BACKDROP, Rect2(old_x, 601, 130, 33), Rect2(800, 601, 130, 33))
+	_draw_station_interior(image_size.x)
 	_draw_compact_escalators()
 	_draw_station_screens()
 	_draw_promenade_people()
-	_draw_people(true, false)
 	_draw_traffic(image_size)
+	_draw_platform_glass(image_size.x)
+	_draw_people(true, false)
 	_draw_people(true, true)
 	_draw_foreground()
 	_draw_people(false)
@@ -412,14 +416,69 @@ func _train_status(seconds: float) -> String:
 	if cycle < 61.0: return "模拟 列车驶离"
 	return "模拟 %d秒后进站" % int(ceil(100.0 - cycle))
 
+func _draw_station_interior(width: float) -> void:
+	# Stylised platform based on Huaxin station's pale tiled finishes,
+	# blue Line 3 signs, ceiling grid and floral-wrapped columns.
+	draw_rect(Rect2(0, 564, width, 92), Color("c5cbd0"))
+	draw_rect(Rect2(0, 564, width, 12), Color("e4e7e6"))
+	draw_rect(Rect2(0, 576, width, 3), Color("7e919d"))
+	for x in range(0, int(width), 54):
+		draw_line(Vector2(x, 566), Vector2(x + 12, 575), Color("aab5bb"), 0.8)
+	for x in range(48, int(width), 155):
+		draw_rect(Rect2(x, 568, 57, 2), Color("fcf4d9"))
+	for y in [598, 619, 640, 655]:
+		draw_line(Vector2(0, y), Vector2(width, y), Color("a8b3b8"), 0.7)
+	for x in range(0, int(width), 72):
+		draw_line(Vector2(x, 579), Vector2(x, 655), Color("b4bfc2"), 0.6)
+	draw_rect(Rect2(0, 650, width, 5), Color("477e98"))
+	# Columns: simplified floral artwork, not a copy of the station's mural.
+	for x in [560, 1086, 1612]:
+		draw_rect(Rect2(x - 17, 578, 34, 77), Color("dce1df"))
+		draw_rect(Rect2(x - 15, 580, 30, 61), Color("d4d9d5"))
+		for i in range(6):
+			var px: float = x - 11 + (i * 13) % 23
+			var py: float = 586 + (i * 17) % 50
+			draw_circle(Vector2(px, py), 3.0, Color("b56986"))
+			draw_circle(Vector2(px + 3, py + 2), 2.0, Color("82a691"))
+		draw_rect(Rect2(x - 17, 641, 34, 14), Color("718c9a"))
+	draw_rect(Rect2(0, 708, width, 8), Color("b5b8ae"))
+	draw_rect(Rect2(0, 708, width, 2), Color("e5bd55"))
+
 func _draw_station_screens() -> void:
 	var now := Time.get_datetime_dict_from_system()
 	var clock := "%02d:%02d" % [now.hour, now.minute]
 	for x in ([820, 1222] if _current_station_shift() > 0.01 else [630, 1444]):
-		draw_rect(Rect2(x, 601, 130, 33), Color("111c32"))
-		draw_rect(Rect2(x, 601, 130, 3), Color("f1a265"))
-		draw_string(_screen_font, Vector2(x + 4, 614), "3号线 华新  " + clock, HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f9e9d1"))
-		draw_string(_screen_font, Vector2(x + 4, 628), _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f6bb73"))
+		draw_rect(Rect2(x, 584, 130, 31), Color("174f80"))
+		draw_rect(Rect2(x, 584, 130, 2), Color("b6d4df"))
+		draw_string(_screen_font, Vector2(x + 4, 596), "3  华新  Huaxin", HORIZONTAL_ALIGNMENT_LEFT, 124, 10, Color("f7fbfa"))
+		draw_string(_screen_font, Vector2(x + 4, 609), clock + "  " + _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 124, 9, Color("edf2dd"))
+
+func _draw_platform_glass(width: float) -> void:
+	# Draw a transparent screen-door line between train and platform. Station
+	# doors open only during the same stop interval as the train doors.
+	var opening: float = Transit.train_doors(animation_time)
+	var centers: Array[float] = []
+	var stop_centers: Array[float] = Transit.platform_door_centers()
+	var first: float = stop_centers[0]
+	var last: float = stop_centers[-1]
+	for i in range(15, 0, -1): centers.append(first - i * 55.0)
+	centers.append_array(stop_centers)
+	for i in range(1, 16): centers.append(last + i * 55.0)
+	for center in centers:
+		if center < -27.5 or center > width + 27.5: continue
+		var active: bool = opening > 0.0 and center >= first and center <= last
+		var gap: float = 12.0 * opening if active else 0.0
+		var left := center - 23.0
+		var right := center + 23.0
+		if left >= 0.0 and right <= width:
+			draw_rect(Rect2(left, 643, 23.0 - gap, 64), Color(0.73, 0.84, 0.86, 0.09))
+			draw_rect(Rect2(center + gap, 643, 23.0 - gap, 64), Color(0.73, 0.84, 0.86, 0.09))
+			draw_line(Vector2(left, 643), Vector2(left, 707), Color(0.28, 0.40, 0.45, 0.66), 1.3)
+			draw_line(Vector2(right, 643), Vector2(right, 707), Color(0.28, 0.40, 0.45, 0.66), 1.3)
+			if gap < 0.1: draw_line(Vector2(center, 646), Vector2(center, 707), Color(0.40, 0.51, 0.53, 0.65), 0.8)
+			draw_rect(Rect2(left, 697, 23.0 - gap, 1.5), Color(0.28, 0.50, 0.62, 0.65))
+			draw_rect(Rect2(center + gap, 697, 23.0 - gap, 1.5), Color(0.28, 0.50, 0.62, 0.65))
+	draw_line(Vector2(0, 642), Vector2(width, 642), Color("8ea9af"), 2.0)
 
 func _draw_promenade_people() -> void:
 	# The waterfront shelter is drawn in front of the background and behind traffic.
@@ -835,19 +894,19 @@ func _draw_traffic(bounds: Vector2) -> void:
 	_draw_car(Rect2(near_car_x, 504.7 - near_offset, 91, 28.3), bounds, true, near_offset > 1.0)
 	_draw_bus(Rect2(near_bus_x, 487.3, 170, 45.7), bounds, true)
 	# Visual simulation: the train runs on the rails, not the walking surface.
-	var train_target := Rect2(_train_x(animation_time, bounds.x), 658, 660, 51)
+	var train_target := Rect2(_train_x(animation_time, bounds.x), 656, 660, 55.5)
 	_draw_vehicle(METRO, METRO_SOURCE, train_target, bounds)
 	_draw_train_wheels(train_target, bounds)
 	var doors: float = Transit.train_doors(animation_time)
 	if doors > 0.0:
-		for fraction in [0.075, 0.205, 0.307, 0.444, 0.550, 0.690, 0.790]:
+		for fraction in Transit.TRAIN_DOOR_FRACTIONS:
 			var x: float = train_target.position.x + train_target.size.x * fraction
-			_draw_open_door(Rect2(x - 5.0 * doors, 668, 10.0 * doors, 29), bounds)
+			_draw_open_door(Rect2(x - 5.0 * doors, 670, 10.0 * doors, 28), bounds)
 
 func _draw_train_wheels(target: Rect2, bounds: Vector2) -> void:
 	# Four-car bogies share travel distance, so they turn during approach and stop at the platform.
 	var angle := target.position.x / 3.0
-	for fraction in [0.044, 0.084, 0.195, 0.234, 0.283, 0.324, 0.434, 0.473, 0.518, 0.559, 0.672, 0.711, 0.765, 0.804, 0.921, 0.958]:
+	for fraction in [0.045, 0.075, 0.157, 0.181, 0.225, 0.259, 0.302, 0.34, 0.376, 0.414, 0.454, 0.486, 0.529, 0.558, 0.605, 0.635, 0.68, 0.707, 0.755, 0.787, 0.829, 0.862, 0.904, 0.94]:
 		var center := target.position + Vector2(target.size.x * fraction, target.size.y * 0.88)
 		if center.x < 2.0 or center.x > bounds.x - 2.0: continue
 		draw_circle(center, 2.0, Color("3d4955"))
@@ -894,8 +953,7 @@ func _draw_wall_shape(points: PackedVector2Array, source_offset: Vector2) -> voi
 
 func _draw_compact_escalators() -> void:
 	var shift := _current_station_shift()
-	if shift <= 0.01: return
-	# Move both complete staircases with the entrances into the cropped view.
+	# Redraw both complete staircases over the new wall, even at original scale.
 	var left := PackedVector2Array([
 		Vector2(132, 568), Vector2(199, 568), Vector2(299, 667),
 		Vector2(311, 667), Vector2(317, 673), Vector2(317, 683),
