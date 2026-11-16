@@ -59,7 +59,7 @@ $enginePath = Join-Path $projectDir '.tools\godot\Godot_v4.6-stable_win64.exe'
 if (-not (Test-Path -LiteralPath $enginePath)) { throw 'Godot 4.6 executable not found.' }
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $resolution = '{0}x{1}' -f $screen.Width,$screen.Height
-$arguments = @('--path', ('"' + $projectDir + '"'), '--resolution', $resolution, '--borderless', '--', '--wallpaper')
+$arguments = @('--path', ('"' + $projectDir + '"'), '--resolution', $resolution, '--borderless', 'res://wallpaper/main.tscn', '--', '--wallpaper')
 $process = Start-Process -FilePath $enginePath -ArgumentList $arguments -WorkingDirectory $projectDir -PassThru
 $attached = $false
 try {

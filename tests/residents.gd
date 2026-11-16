@@ -4,6 +4,23 @@ func _initialize() -> void:
 	var Residents = load("res://scripts/residents.gd")
 	var sim = Residents.new()
 	assert(sim.people.size() == 18)
+	var ids: Dictionary = {}
+	for person in sim.people:
+		assert(not ids.has(person.character_id))
+		ids[person.character_id] = true
+	assert(ids.size() == 18)
+	var city = load("res://scripts/city.gd").new()
+	var slots: Dictionary = {}
+	for person in sim.people:
+		var sheet_index := floori(float(person.character_id) / 4.0)
+		var row: int = person.character_id % 4
+		assert(sheet_index < city.walk_sheets.size())
+		var slot := Vector2i(sheet_index, row)
+		assert(not slots.has(slot))
+		slots[slot] = true
+	city.free()
+	var wallpaper_sim = load("res://wallpaper/scripts/residents.gd").new()
+	assert(not wallpaper_sim.people[0].has("character_id"))
 	assert(sim.people.filter(func(p): return p.promenade).size() == 6)
 	assert(sim.people.filter(func(p): return p.platform).size() == 4)
 	var shelter: Dictionary = sim.people[3]

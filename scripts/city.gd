@@ -4,6 +4,8 @@ const BACKDROP: Texture2D = preload("res://assets/city-clean.png")
 const APPROVED_BACKGROUND: Texture2D = preload("res://assets/shenzhen-no-sun.png")
 const METRO: Texture2D = preload("res://assets/metro.png")
 const WALK: Texture2D = preload("res://assets/manga-walk.png")
+const WALK_FOUR: Texture2D = preload("res://assets/character-walk-four.png")
+const WALK_FIVE: Texture2D = preload("res://assets/character-walk-five.png")
 const WALK_MORE: Texture2D = preload("res://assets/character-walk-more.png")
 const WALK_EXTRA: Texture2D = preload("res://assets/kyoto-star-walk.png")
 const VEHICLES: Texture2D = preload("res://assets/city-vehicles.png")
@@ -31,9 +33,8 @@ var _panel: PanelContainer
 var _status_label: Label
 var _mode_select: OptionButton
 var _screen_font: SystemFont
-var walk_reversed: Texture2D
-var walk_extra_reversed: Texture2D
-var walk_more_reversed: Texture2D
+var walk_sheets: Array[Texture2D] = [WALK, WALK_EXTRA, WALK_MORE, WALK_FOUR, WALK_FIVE]
+var walk_sheets_reversed: Array[Texture2D] = []
 var vehicles_reversed: Texture2D
 var residents = Residents.new()
 
@@ -41,11 +42,10 @@ func _ready() -> void:
 	Engine.max_fps = 60
 	DisplayServer.window_set_title("深圳像素城市 · 桌面壁纸")
 	get_window().min_size = Vector2i(600, 200)
-	settings_path = OS.get_environment("APPDATA").path_join("PixelCity").path_join("display.cfg")
+	settings_path = OS.get_environment("APPDATA").path_join("PixelCity").path_join("preview-display.cfg")
 	_load_display_mode()
-	walk_reversed = _flip_texture(WALK)
-	walk_extra_reversed = _flip_texture(WALK_EXTRA)
-	walk_more_reversed = _flip_texture(WALK_MORE)
+	for sheet in walk_sheets:
+		walk_sheets_reversed.append(_flip_texture(sheet))
 	vehicles_reversed = _flip_texture(VEHICLES)
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT_SECONDS
@@ -287,15 +287,16 @@ func _draw_resident(person: Dictionary, y: float, scale: float) -> void:
 		_draw_mood(pos + Vector2(0, (-52.0 if _is_raining() and person.umbrella else -39.0) * scale), person.mood)
 
 func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) -> void:
-	var variant: int = person.id % 12
+	var variant: int = person.character_id
 	var walking: bool = person.moving and person.state in ["walk", "boarding", "shelter"]
-	var sheet: Texture2D = WALK if variant < 4 else (WALK_EXTRA if variant < 8 else WALK_MORE)
+	var sheet_index := floori(float(variant) / 4.0)
+	var sheet: Texture2D = walk_sheets[sheet_index]
 	var cell := Vector2(sheet.get_width() / 4.0, sheet.get_height() / 4.0)
 	var frame := phase if walking else 0
 	var source := Rect2(frame * cell.x, (variant % 4) * cell.y, cell.x, cell.y)
 	var texture: Texture2D = sheet
 	if person.direction < 0:
-		texture = walk_reversed if variant < 4 else (walk_extra_reversed if variant < 8 else walk_more_reversed)
+		texture = walk_sheets_reversed[sheet_index]
 		source.position.x = sheet.get_width() - source.end.x
 	var fade := clampf(person.timer / 2.0, 0.0, 1.0) if person.state == "boarding" else 1.0
 	# A small grounding shadow makes the walking layer sit on the pavement.

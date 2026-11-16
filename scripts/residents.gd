@@ -9,7 +9,7 @@ func _init() -> void:
 		var promenade := i >= 8 and i <= 13
 		var platform := i in [1, 5, 14, 17]
 		var x := (470.0 + (i - 8) * 220.0) if promenade else (990.0 if i < 2 else 480.0 + fposmod(i * 211.0, 1230.0))
-		people.append({"id": i, "platform": platform, "promenade": promenade, "x": x,
+		people.append({"id": i, "character_id": i, "platform": platform, "promenade": promenade, "x": x,
 			"direction": 1 if i % 2 == 0 else -1, "state": "walk", "timer": 0.0,
 			"cooldown": 0.0, "umbrella": i % 2 == 0, "mood": "开心",
 			"walk_distance": 0.0, "moving": false, "idle_due": 8.0 + i * 3.7})
