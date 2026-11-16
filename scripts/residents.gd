@@ -5,7 +5,7 @@ extends RefCounted
 const Planner = preload("res://scripts/citizen_planner.gd")
 const FAR_SHELTER_X := 600.0
 const FAR_DOOR_X := 700.0
-const FAR_BUS_X := 644.0
+const FAR_BUS_X := 634.4
 var people: Array[Dictionary] = []
 
 func _init() -> void:

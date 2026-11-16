@@ -20,6 +20,8 @@ func _initialize() -> void:
 	city.weather_override = -1
 	assert(city._visual_weather_code() == 2)
 	# Both vehicle cutouts retain their own source rectangles and proportions.
+	assert(city.SHENZHEN_BUS.get_width() >= city.BUS_SOURCE.end.x)
+	assert(city.SHENZHEN_BUS.get_height() >= city.BUS_SOURCE.end.y)
 	assert(city.SU7_YELLOW.get_width() >= city.SU7_SOURCE.end.x)
 	assert(city.YU7_GREEN.get_width() >= city.YU7_SOURCE.end.x)
 	assert(city.SU7_SOURCE.size.x / city.SU7_SOURCE.size.y > city.YU7_SOURCE.size.x / city.YU7_SOURCE.size.y)
@@ -37,11 +39,17 @@ func _initialize() -> void:
 	assert(is_zero_approx(city._station_shift(Vector2(1500, 500), image_size, "sky")))
 	assert(is_zero_approx(city._station_shift(view, image_size, "fit")))
 	assert(is_equal_approx(city._station_shift(Vector2(2880, 1800), image_size, "sky"), 400.0))
-	var sections: Array[Rect2] = city._vehicle_sections(Rect2(300, 465, 200, 68), image_size, 0.0)
-	assert(sections.size() == 1 and is_equal_approx(sections[0].position.x, 415.0))
-	assert(is_equal_approx(sections[0].end.x, 500.0))
-	var right_sections: Array[Rect2] = city._vehicle_sections(Rect2(1700, 465, 160, 68), image_size, 0.0)
-	assert(right_sections.size() == 1 and is_equal_approx(right_sections[0].end.x, 1756.0))
+	# Areas beside and above each sloped entrance remain visible to traffic.
+	var left: PackedVector2Array = city._entrance_outline(false)
+	var right: PackedVector2Array = city._entrance_outline(true)
+	assert(not Geometry2D.is_point_in_polygon(Vector2(420, 500), left))
+	assert(not Geometry2D.is_point_in_polygon(Vector2(400, 480), left))
+	assert(Geometry2D.is_point_in_polygon(Vector2(300, 520), left))
+	assert(not Geometry2D.is_point_in_polygon(Vector2(1752, 500), right))
+	assert(Geometry2D.is_point_in_polygon(Vector2(1872, 520), right))
+	var shifted: PackedVector2Array = city._entrance_outline(false, 400.0)
+	assert(not Geometry2D.is_point_in_polygon(Vector2(820, 500), shifted))
+	assert(Geometry2D.is_point_in_polygon(Vector2(700, 520), shifted))
 	var stretch: Rect2 = city._display_rect(view, image_size, "stretch")
 	assert(stretch.position == Vector2.ZERO and stretch.size == view)
 	assert(city._train_x(0.0, image_size.x) < 0.0)
@@ -53,8 +61,9 @@ func _initialize() -> void:
 	assert(city._bus_x(40.0, image_size.x, false) > city._bus_x(33.0, image_size.x, false))
 	assert(city._bus_x(40.0, image_size.x, true) < city._bus_x(33.0, image_size.x, true))
 	# Waterfront bus door lines up with its own shelter, not the other stop.
-	assert(is_equal_approx(city._bus_x(28.0, image_size.x, false), 644.0))
-	assert(is_equal_approx(city._bus_x(28.0, image_size.x, false) + 160.0 * 0.35, 700.0))
+	assert(is_equal_approx(city._bus_x(28.0, image_size.x, false), 634.4))
+	assert(is_equal_approx(city._bus_x(28.0, image_size.x, false) + 160.0 * 0.41, 700.0))
+	assert(absf(city._bus_x(28.0, image_size.x, true) + 170.0 * 0.59 - 1100.0) < 0.1)
 	# Buses remain at the stop while cars keep moving and use the passing lane.
 	assert(is_equal_approx(city._bus_x(28.0, image_size.x, false), city._bus_x(29.0, image_size.x, false)))
 	assert(city._car_x(21.0, image_size.x, false) > city._car_x(20.0, image_size.x, false))
