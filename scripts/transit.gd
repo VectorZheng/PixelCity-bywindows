@@ -27,3 +27,9 @@ static func bus_doors(seconds: float) -> float:
 	if cycle < 26.5: return smoothstep(25.5, 26.5, cycle)
 	if cycle < 31.0: return 1.0
 	return 1.0 - smoothstep(31.0, 32.0, cycle)
+
+# Countdown follows the exact same 70-second simulated bus cycle as _bus_x.
+static func bus_arrival_seconds(seconds: float) -> int:
+	var cycle := fposmod(seconds, 70.0)
+	if cycle >= 25.0 and cycle < 33.0: return 0
+	return ceili(fposmod(25.0 - cycle, 70.0))

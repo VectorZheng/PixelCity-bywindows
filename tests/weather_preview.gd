@@ -7,6 +7,13 @@ func _run() -> void:
 	var preview = load("res://main.tscn").instantiate()
 	root.add_child(preview)
 	await process_frame
+	assert(preview.window_lights.size() > 0 and preview.leaf_patches.size() > 0)
+	preview.display_mode = "sky"
+	preview._sync_weather_effects()
+	assert(is_equal_approx(preview.rain_fx.get_param(&"entrance_offset"), 400.0))
+	preview.display_mode = "fit"
+	preview._sync_weather_effects()
+	assert(is_zero_approx(preview.rain_fx.get_param(&"entrance_offset")))
 	var controls := root.find_children("*", "OptionButton", true, false)
 	var weather_select: OptionButton
 	for control in controls:

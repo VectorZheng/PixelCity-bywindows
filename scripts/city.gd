@@ -14,6 +14,7 @@ const UFO: Texture2D = preload("res://assets/ufo-cc0.png")
 const Residents = preload("res://scripts/residents.gd")
 const Transit = preload("res://scripts/transit.gd")
 const WeatherEffects = preload("res://addons/weather_fx/weather_fx.gd")
+const COMPACT_STATION_SHIFT := 400.0
 const METRO_SOURCE := Rect2(9, 273, 2155, 216)
 const WEATHER_URL := "https://api.open-meteo.com/v1/forecast?latitude=22.5431&longitude=114.0579&current=temperature_2m,weather_code,is_day&timezone=Asia%2FShanghai"
 const CACHE_PATH := "user://weather.json"
@@ -43,6 +44,8 @@ var residents = Residents.new()
 var rain_fx: WeatherFX
 var snow_fx: WeatherFX
 var fog_fx: WeatherFX
+var window_lights: Array[Vector2] = []
+var leaf_patches: Array[Rect2] = []
 
 func _ready() -> void:
 	Engine.max_fps = 60
@@ -60,6 +63,7 @@ func _ready() -> void:
 	_http.request_completed.connect(_on_weather_completed)
 	_screen_font = SystemFont.new()
 	_screen_font.font_names = PackedStringArray(["Microsoft YaHei", "SimHei", "Arial"])
+	_prepare_environment_details()
 	_build_panel()
 	_create_weather_effects()
 	if OS.get_cmdline_user_args().has("--capture-fit"):
@@ -217,12 +221,18 @@ func _draw() -> void:
 	# Keep the user's approved sky and skyline from the original image.
 	var skyline := Rect2(0, 0, image_size.x, 429)
 	draw_texture_rect_region(APPROVED_BACKGROUND, skyline, skyline)
+	_draw_environment_motion()
 	# Replace the opaque, painted-in shelter with matching street before traffic.
 	draw_texture_rect_region(BACKDROP, Rect2(990, 470, 190, 94), Rect2(700, 470, 190, 94))
 	_draw_sun(Time.get_datetime_dict_from_system())
 	_draw_weather_sky(image_size)
 	_draw_ufo()
 	_draw_road_edges(image_size.x)
+	if display_mode == "sky":
+		# Remove the old painted-on screens before placing the relocated ones.
+		for old_x in [630, 1444]:
+			draw_texture_rect_region(BACKDROP, Rect2(old_x, 601, 130, 33), Rect2(800, 601, 130, 33))
+	_draw_compact_escalators()
 	_draw_station_screens()
 	_draw_promenade_people()
 	_draw_people(true, false)
@@ -238,6 +248,41 @@ func _draw() -> void:
 	if tint.a > 0.0:
 		draw_rect(Rect2(Vector2.ZERO, size), tint)
 	_draw_lightning(size, target)
+
+func _prepare_environment_details() -> void:
+	# Pick existing lit windows and foliage pixels from the artwork. No windows
+	# are placed over sky, and the small moving patches retain the original art.
+	var skyline := APPROVED_BACKGROUND.get_image()
+	for y in range(180, 330, 3):
+		for x in range(150, 2050, 3):
+			if (x * 17 + y * 31) % 37 != 0: continue
+			var c := skyline.get_pixel(x, y)
+			var neighbour := skyline.get_pixel(x + 2, y)
+			if c.r > 0.51 and c.g > 0.27 and c.r - c.b > 0.04 and c.r + c.g + c.b - neighbour.r - neighbour.g - neighbour.b > 0.15 and maxf(neighbour.r, maxf(neighbour.g, neighbour.b)) < 0.67:
+				window_lights.append(Vector2(x, y))
+	var scene := BACKDROP.get_image()
+	for center in [318, 635, 850, 1055, 1220, 1380, 1590, 1860]:
+		for i in range(18):
+			var x: int = center - 34 + ((i * 23 + center) % 68)
+			var y: int = 371 + ((i * 13 + center) % 43)
+			var c := scene.get_pixel(x, y)
+			if maxf(c.r, maxf(c.g, c.b)) < 0.38:
+				leaf_patches.append(Rect2(x, y, 4, 3))
+
+func _draw_environment_motion() -> void:
+	var now := Time.get_datetime_dict_from_system()
+	var hour := float(now.hour) + float(now.minute) / 60.0
+	var evening := smoothstep(16.0, 20.0, hour) if hour >= 6.0 else 1.0
+	if hour >= 6.0 and hour < 8.0: evening = 1.0 - smoothstep(6.0, 8.0, hour)
+	for i in range(window_lights.size()):
+		var p := window_lights[i]
+		var pulse := 0.5 + 0.5 * sin(animation_time * (0.35 + 0.09 * (i % 5)) + i * 2.4)
+		var alpha := (0.04 + 0.43 * evening) * smoothstep(0.25, 0.85, pulse)
+		draw_rect(Rect2(p, Vector2(2, 2)), Color(1.0, 0.76, 0.42, alpha))
+	for i in range(leaf_patches.size()):
+		var patch := leaf_patches[i]
+		var sway := sin(animation_time * 1.1 + patch.position.x * 0.014) * 1.4
+		draw_texture_rect_region(BACKDROP, Rect2(patch.position + Vector2(sway, 0), patch.size), patch)
 
 func _draw_lightning(size: Vector2, target: Rect2) -> void:
 	if _visual_weather_code() not in [95, 96, 99]: return
@@ -275,6 +320,7 @@ func _sync_weather_effects() -> void:
 	var scene_scale := target.size / BACKDROP.get_size()
 	var near_roof := Rect2(target.position + Vector2(990, 475) * scene_scale, Vector2(190, 82) * scene_scale)
 	var far_roof := Rect2(target.position + Vector2(380, 410) * scene_scale, Vector2(155, 56) * scene_scale)
+	rain_fx.set_param(&"entrance_offset", COMPACT_STATION_SHIFT if display_mode == "sky" else 0.0)
 	rain_fx.set_param(&"scene_transform", Vector4(target.position.x, target.position.y, scene_scale.x, scene_scale.y))
 	rain_fx.set_param(&"shelter_a", Vector4(near_roof.position.x, near_roof.position.y, near_roof.end.x, near_roof.end.y))
 	rain_fx.set_param(&"shelter_b", Vector4(far_roof.position.x, far_roof.position.y, far_roof.end.x, far_roof.end.y))
@@ -329,7 +375,7 @@ func _train_status(seconds: float) -> String:
 func _draw_station_screens() -> void:
 	var now := Time.get_datetime_dict_from_system()
 	var clock := "%02d:%02d" % [now.hour, now.minute]
-	for x in [630, 1444]:
+	for x in ([820, 1222] if display_mode == "sky" else [630, 1444]):
 		draw_rect(Rect2(x, 601, 130, 33), Color("111c32"))
 		draw_rect(Rect2(x, 601, 130, 3), Color("f1a265"))
 		draw_string(_screen_font, Vector2(x + 4, 614), "3号线 华新  " + clock, HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f9e9d1"))
@@ -400,24 +446,49 @@ func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) ->
 		draw_texture_rect_region(texture, destination, source, Color(1, 1, 1, fade * (1.0 - blend)))
 		if blend > 0.0: draw_texture_rect_region(texture, destination, next_source, Color(1, 1, 1, fade * blend))
 		return
+	if person.state in ["look_board", "fold_umbrella"] and not person.moving:
+		_draw_back_waiter(pos, person, scale, 0.0, fade)
+		return
 	if person.sit < 0.99:
 		draw_texture_rect_region(texture, Rect2(pos.x - 13 * scale, pos.y - 36 * scale, 27 * scale, 36 * scale), source, Color(1, 1, 1, fade * (1.0 - person.sit)))
 	if person.sit > 0.01:
-		# Crossfade into a seated pose while keeping the character's head and coat.
-		var body_source := source
-		body_source.size.y *= 0.70
-		var body_height := lerpf(25.2, 20.0, person.sit) * scale
-		var top: float = pos.y - 36.0 * scale + 4.0 * scale * person.sit + sin(animation_time * 2.0 + person.id) * 0.35 * scale * person.sit
-		draw_texture_rect_region(texture, Rect2(pos.x - 13 * scale, top, 27 * scale, body_height), body_source, Color(1, 1, 1, fade * person.sit))
-		var hip := Vector2(pos.x + 1.0 * scale, top + body_height - 2.0 * scale)
-		var knee := hip + Vector2(7.0 * person.direction, 2.0) * scale
-		var foot := Vector2(knee.x, pos.y - 2.0 * scale)
-		var trouser_colors := [Color("b96936"), Color("34445c"), Color("42556c"), Color("4d4160")]
-		var trousers: Color = trouser_colors[person.character_id % trouser_colors.size()]
-		trousers.a = fade * person.sit
-		draw_line(hip, knee, trousers, 3.5 * scale)
-		draw_line(knee, foot, trousers, 3.0 * scale)
-		draw_line(foot, foot + Vector2(4 * person.direction, 0) * scale, Color(0.12, 0.13, 0.18, fade * person.sit), 2.0 * scale)
+		_draw_back_waiter(pos, person, scale, person.sit, fade * person.sit)
+
+func _draw_back_waiter(pos: Vector2, person: Dictionary, scale: float, seated: float, opacity: float) -> void:
+	# Rear-facing waiting poses with filled trouser legs, knees and shoes.
+	var hair_colors := ["e5ae3a", "25232b", "488bd0", "563829", "773b3b", "d1b380", "e9a9bc", "65596e", "503337", "7b4d3b", "b6834c", "3b343b", "a36767", "312d38", "d4b987", "43333c", "c6a686", "44333d"]
+	var coat_colors := ["e07e32", "bb4b3e", "3b82bd", "375887", "686e88", "604b6f", "ca9bad", "584765", "aa6c6c", "535c82", "9b7655", "61746c", "985e6b", "506c80", "a07c73", "697489", "987b8c", "4f556b"]
+	var hair := Color(hair_colors[person.character_id])
+	var coat := Color(coat_colors[person.character_id])
+	var outline := Color("252831")
+	var pants := Color("394456")
+	var shoes := Color("242c39")
+	hair.a = opacity; coat.a = opacity; outline.a = opacity; pants.a = opacity; shoes.a = opacity
+	var top := pos.y - (36.0 - seated * 4.0) * scale + sin(animation_time * 1.5 + person.id) * 0.25 * scale
+	var x := pos.x
+	var head := PackedVector2Array([Vector2(x - 8 * scale, top + 4 * scale), Vector2(x - 5 * scale, top), Vector2(x + 5 * scale, top), Vector2(x + 8 * scale, top + 4 * scale), Vector2(x + 7 * scale, top + 13 * scale), Vector2(x + 3 * scale, top + 16 * scale), Vector2(x - 6 * scale, top + 15 * scale)])
+	draw_colored_polygon(head, outline)
+	draw_rect(Rect2(x - 6 * scale, top + 3 * scale, 12 * scale, 11 * scale), hair)
+	draw_rect(Rect2(x - 4 * scale, top + 1 * scale, 7 * scale, 3 * scale), hair.lightened(0.18))
+	# The hair silhouette and small accessory keep the rear pose identifiable.
+	if person.character_id == 0:
+		var spikes := PackedVector2Array([Vector2(x - 7 * scale, top + 4 * scale), Vector2(x - 8 * scale, top), Vector2(x - 4 * scale, top + scale), Vector2(x - 2 * scale, top - 3 * scale), Vector2(x + scale, top), Vector2(x + 5 * scale, top - 2 * scale), Vector2(x + 7 * scale, top + 4 * scale)])
+		draw_colored_polygon(spikes, hair)
+		draw_rect(Rect2(x - 6 * scale, top + 7 * scale, 12 * scale, 2 * scale), Color(0.18, 0.25, 0.38, opacity))
+	else:
+		draw_rect(Rect2(x - 6 * scale, top + 10 * scale, 12 * scale, 3 * scale), hair.darkened(0.18))
+	var body_y := top + 14 * scale
+	draw_rect(Rect2(x - 8 * scale, body_y + 2 * scale, 16 * scale, 12 * scale), outline)
+	draw_rect(Rect2(x - 6 * scale, body_y + 3 * scale, 12 * scale, 10 * scale), coat)
+	draw_rect(Rect2(x - 3 * scale, body_y + 4 * scale, 6 * scale, 2 * scale), coat.lightened(0.14))
+	var hip_y := lerpf(pos.y - 13 * scale, pos.y - 10 * scale, seated)
+	for side in [-1, 1]:
+		var leg_x := x + (float(side) * 3.5 - 2.5) * scale
+		draw_rect(Rect2(leg_x, hip_y, 5 * scale, 7 * scale), pants)
+		draw_rect(Rect2(leg_x + scale, hip_y + scale, 3 * scale, 2 * scale), pants.lightened(0.18))
+		draw_rect(Rect2(leg_x - scale * 0.5, hip_y + 6 * scale, 6 * scale, 3 * scale), shoes)
+		draw_rect(Rect2(leg_x, hip_y + 8 * scale, 5 * scale, scale), Color(0.64, 0.64, 0.62, opacity))
+
 
 func draw_ellipse_shadow(pos: Vector2, scale: float, opacity: float) -> void:
 	var points := PackedVector2Array([pos + Vector2(-8, -1) * scale, pos + Vector2(-5, -3) * scale, pos + Vector2(5, -3) * scale, pos + Vector2(8, -1) * scale, pos + Vector2(5, 1) * scale, pos + Vector2(-5, 1) * scale])
@@ -707,22 +778,36 @@ func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
 		distance = lerpf(scene_width * 0.5 - 90.0, scene_width + 210.0, t * t)
 	return scene_width - distance - 185.0 if reversed else distance
 
+func _draw_compact_escalators() -> void:
+	if display_mode != "sky": return
+	# Move both complete staircases with the entrances into the cropped view.
+	var left := PackedVector2Array([
+		Vector2(132, 568), Vector2(199, 568), Vector2(299, 667),
+		Vector2(311, 667), Vector2(317, 673), Vector2(317, 683),
+		Vector2(311, 691), Vector2(260, 691)])
+	var right := PackedVector2Array()
+	for point in left: right.append(Vector2(2172.0 - point.x, point.y))
+	_draw_backdrop_shape(left, Vector2(COMPACT_STATION_SHIFT, 0))
+	_draw_backdrop_shape(right, Vector2(-COMPACT_STATION_SHIFT, 0))
+
 func _draw_foreground() -> void:
-	# Redraw only the entrance silhouettes, not the surrounding rectangular
-	# road: rectangular patches cut moving vehicles in half at both entrances.
-	_draw_station_foreground(PackedVector2Array([
+	# Only redraw station silhouettes, so the road around them never clips cars.
+	var shift := COMPACT_STATION_SHIFT if display_mode == "sky" else 0.0
+	_draw_backdrop_shape(PackedVector2Array([
 		Vector2(32, 484), Vector2(52, 470), Vector2(268, 473),
-		Vector2(415, 554), Vector2(46, 554), Vector2(46, 484)]))
-	_draw_station_foreground(PackedVector2Array([
+		Vector2(415, 554), Vector2(46, 554), Vector2(46, 484)]), Vector2(shift, 0))
+	_draw_backdrop_shape(PackedVector2Array([
 		Vector2(1756, 554), Vector2(1904, 473), Vector2(2120, 470),
-		Vector2(2140, 484), Vector2(2126, 484), Vector2(2126, 554)]))
+		Vector2(2140, 484), Vector2(2126, 484), Vector2(2126, 554)]), Vector2(-shift, 0))
 	_draw_bus_shelter()
 
-func _draw_station_foreground(points: PackedVector2Array) -> void:
+func _draw_backdrop_shape(source_points: PackedVector2Array, offset: Vector2) -> void:
+	var vertices := PackedVector2Array()
 	var uvs := PackedVector2Array()
-	for point in points:
+	for point in source_points:
+		vertices.append(point + offset)
 		uvs.append(point / BACKDROP.get_size())
-	draw_polygon(points, PackedColorArray([Color.WHITE]), uvs, BACKDROP)
+	draw_polygon(vertices, PackedColorArray([Color.WHITE]), uvs, BACKDROP)
 
 func _draw_bus_shelter() -> void:
 	# The panes are transparent so the road remains visible through the shelter.
@@ -737,12 +822,15 @@ func _draw_bus_shelter() -> void:
 	draw_rect(Rect2(1018, 538, 82, 4), Color("b97759"))
 	draw_rect(Rect2(1028, 542, 3, 10), frame)
 	draw_rect(Rect2(1090, 542, 3, 10), frame)
-	draw_rect(Rect2(1134, 492, 21, 16), frame)
-	draw_rect(Rect2(1137, 495, 15, 2), Color("e2a779"))
-	draw_rect(Rect2(1137, 500, 11, 2), Color("b5b8b7"))
-	var bus_phase := fposmod(animation_time + 32.0, 70.0)
-	var arrival := 0 if bus_phase >= 25.0 and bus_phase < 33.0 else ceili(fposmod(26.0 - bus_phase, 70.0))
-	draw_string(_screen_font, Vector2(1137, 506), str(arrival) + "s", HORIZONTAL_ALIGNMENT_LEFT, 17, 6, Color("e5d4aa"))
+	# A legible simulated route board, synced to the near-side bus stop.
+	var board := Rect2(1074, 489, 91, 38)
+	draw_rect(board.grow(2), Color("202b3c"))
+	draw_rect(board, Color("111b26"))
+	draw_rect(Rect2(board.position.x, board.position.y, board.size.x, 2), Color("d89456"))
+	var arrival: int = Transit.bus_arrival_seconds(animation_time + 32.0)
+	var arrival_text := "已到站" if arrival == 0 else str(arrival) + " 秒后到站"
+	draw_string(_screen_font, Vector2(1080, 503), "模拟 3 路", HORIZONTAL_ALIGNMENT_LEFT, 80, 11, Color("f6cf8a"))
+	draw_string(_screen_font, Vector2(1080, 519), arrival_text, HORIZONTAL_ALIGNMENT_LEFT, 80, 10, Color("e9f2df"))
 
 func _train_x(seconds: float, scene_width: float) -> float:
 	return Transit.train_position(seconds, scene_width)
