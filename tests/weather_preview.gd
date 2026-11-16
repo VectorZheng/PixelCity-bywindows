@@ -10,7 +10,7 @@ func _run() -> void:
 	assert(preview.window_lights.size() > 0 and preview.leaf_patches.size() > 0)
 	preview.display_mode = "sky"
 	preview._sync_weather_effects()
-	assert(is_equal_approx(preview.rain_fx.get_param(&"entrance_offset"), 400.0))
+	assert(is_equal_approx(preview.rain_fx.get_param(&"entrance_offset"), preview._current_station_shift()))
 	preview.display_mode = "fit"
 	preview._sync_weather_effects()
 	assert(is_zero_approx(preview.rain_fx.get_param(&"entrance_offset")))

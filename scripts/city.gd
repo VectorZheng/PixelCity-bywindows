@@ -242,8 +242,15 @@ func _draw() -> void:
 	_draw_sun(Time.get_datetime_dict_from_system())
 	_draw_weather_sky(image_size)
 	_draw_ufo()
+	var station_shift := _station_shift(get_viewport_rect().size, image_size, display_mode)
+	if station_shift > 0.01:
+		# The station artwork is baked into the background; clear both old
+		# copies before drawing the relocated entrances and escalators.
+		draw_texture_rect_region(BACKDROP, Rect2(0, 470, 420, 94), Rect2(500, 470, 420, 94))
+		draw_texture_rect_region(BACKDROP, Rect2(1752, 470, 420, 94), Rect2(1250, 470, 420, 94))
+		_draw_escalator_wall_patches()
 	_draw_road_edges(image_size.x)
-	if display_mode == "sky":
+	if station_shift > 0.01:
 		# Remove the old painted-on screens before placing the relocated ones.
 		for old_x in [630, 1444]:
 			draw_texture_rect_region(BACKDROP, Rect2(old_x, 601, 130, 33), Rect2(800, 601, 130, 33))
@@ -335,7 +342,7 @@ func _sync_weather_effects() -> void:
 	var scene_scale := target.size / BACKDROP.get_size()
 	var near_roof := Rect2(target.position + Vector2(990, 475) * scene_scale, Vector2(190, 82) * scene_scale)
 	var far_roof := Rect2(target.position + Vector2(Residents.FAR_SHELTER_X, 412) * scene_scale, Vector2(155, 53) * scene_scale)
-	rain_fx.set_param(&"entrance_offset", COMPACT_STATION_SHIFT if display_mode == "sky" else 0.0)
+	rain_fx.set_param(&"entrance_offset", _station_shift(size, BACKDROP.get_size(), display_mode))
 	rain_fx.set_param(&"scene_transform", Vector4(target.position.x, target.position.y, scene_scale.x, scene_scale.y))
 	rain_fx.set_param(&"shelter_a", Vector4(near_roof.position.x, near_roof.position.y, near_roof.end.x, near_roof.end.y))
 	rain_fx.set_param(&"shelter_b", Vector4(far_roof.position.x, far_roof.position.y, far_roof.end.x, far_roof.end.y))
@@ -390,7 +397,7 @@ func _train_status(seconds: float) -> String:
 func _draw_station_screens() -> void:
 	var now := Time.get_datetime_dict_from_system()
 	var clock := "%02d:%02d" % [now.hour, now.minute]
-	for x in ([820, 1222] if display_mode == "sky" else [630, 1444]):
+	for x in ([820, 1222] if _current_station_shift() > 0.01 else [630, 1444]):
 		draw_rect(Rect2(x, 601, 130, 33), Color("111c32"))
 		draw_rect(Rect2(x, 601, 130, 3), Color("f1a265"))
 		draw_string(_screen_font, Vector2(x + 4, 614), "3号线 华新  " + clock, HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f9e9d1"))
@@ -620,6 +627,41 @@ func _display_rect(view: Vector2, artwork: Vector2, mode: String) -> Rect2:
 		return Rect2(Vector2((view.x - output.x) / 2.0, view.y - output.y), output)
 	return Rect2((view - output) / 2.0, output)
 
+func _station_shift(view: Vector2, artwork: Vector2, mode: String) -> float:
+	if mode != "sky": return 0.0
+	var target := _display_rect(view, artwork, mode)
+	var visible_left := maxf(0.0, -target.position.x / (target.size.x / artwork.x))
+	return clampf(visible_left - 16.0, 0.0, COMPACT_STATION_SHIFT)
+
+func _current_station_shift() -> float:
+	return _station_shift(get_viewport_rect().size, BACKDROP.get_size(), display_mode)
+
+func _entrance_intervals(shift: float) -> Array[Vector2]:
+	return [Vector2(32.0 + shift, 415.0 + shift), Vector2(1756.0 - shift, 2140.0 - shift)]
+
+func _vehicle_sections(target: Rect2, bounds: Vector2, shift: float) -> Array[Rect2]:
+	var sections: Array[Rect2] = []
+	var clipped := target.intersection(Rect2(Vector2.ZERO, bounds))
+	if not clipped.has_area(): return sections
+	var left := clipped.position.x
+	for span in _entrance_intervals(shift):
+		if span.y <= left or span.x >= clipped.end.x: continue
+		if span.x > left:
+			sections.append(Rect2(left, clipped.position.y, span.x - left, clipped.size.y))
+		left = maxf(left, span.y)
+	if left < clipped.end.x:
+		sections.append(Rect2(left, clipped.position.y, clipped.end.x - left, clipped.size.y))
+	return sections
+
+func _entrance_covers_x(x: float, compact_traffic: bool = false) -> bool:
+	# At the compact scale the far bus stop sits behind an entrance; its
+	# silhouette provides depth without hiding the entire stopped bus.
+	var shift := _current_station_shift()
+	if shift > 0.01 and not compact_traffic: return false
+	for span in _entrance_intervals(shift):
+		if x >= span.x and x <= span.y: return true
+	return false
+
 func _draw_extended_sky(view: Vector2, target: Rect2) -> void:
 	# Extend the original top-edge colour upwards, leaving the artwork undistorted.
 	var top := Color("5c4a88")
@@ -677,18 +719,23 @@ func _flip_texture(texture: Texture2D) -> Texture2D:
 	image.flip_x()
 	return ImageTexture.create_from_image(image)
 
-func _draw_vehicle(texture: Texture2D, source: Rect2, target: Rect2, bounds: Vector2, reversed: bool = false, modulate: Color = Color.WHITE) -> void:
-	# Clip at the scene edges so vehicles enter and leave instead of drawing into letterboxing.
-	var clipped := target.intersection(Rect2(Vector2.ZERO, bounds))
-	if clipped.size.x <= 0.0 or clipped.size.y <= 0.0:
-		return
+func _draw_vehicle(texture: Texture2D, source: Rect2, target: Rect2, bounds: Vector2, reversed: bool = false, modulate: Color = Color.WHITE, clip_compact: bool = false) -> void:
+	# Ground traffic goes behind the full entrance footprint. Other layers,
+	# including trains and clouds, are clipped only to the scene boundaries.
+	var sections: Array[Rect2] = []
+	if (texture == VEHICLES or texture == vehicles_reversed) and (_current_station_shift() <= 0.01 or clip_compact):
+		sections = _vehicle_sections(target, bounds, _current_station_shift())
+	else:
+		var clipped := target.intersection(Rect2(Vector2.ZERO, bounds))
+		if clipped.has_area(): sections.append(clipped)
 	var source_x := float(texture.get_width()) - source.position.x - source.size.x if reversed else source.position.x
-	var clipped_source := Rect2(
-		source_x + (clipped.position.x - target.position.x) / target.size.x * source.size.x,
-		source.position.y + (clipped.position.y - target.position.y) / target.size.y * source.size.y,
-		clipped.size.x / target.size.x * source.size.x,
-		clipped.size.y / target.size.y * source.size.y)
-	draw_texture_rect_region(texture, clipped, clipped_source, modulate)
+	for clipped in sections:
+		var clipped_source := Rect2(
+			source_x + (clipped.position.x - target.position.x) / target.size.x * source.size.x,
+			source.position.y + (clipped.position.y - target.position.y) / target.size.y * source.size.y,
+			clipped.size.x / target.size.x * source.size.x,
+			clipped.size.y / target.size.y * source.size.y)
+		draw_texture_rect_region(texture, clipped, clipped_source, modulate)
 
 func _draw_road_edges(width: float) -> void:
 	# Two opposite one-way lanes are separated by the existing central barrier.
@@ -724,10 +771,11 @@ func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 	var texture: Texture2D = vehicles_reversed if reversed else VEHICLES
 	# Subtle suspension motion is driven by distance, so it stops with the bus.
 	target.position.y += sin(target.position.x * 0.075) * 0.45
-	_draw_vehicle(texture, Rect2(10, 140, 1235, 495), target, bounds, reversed)
+	_draw_vehicle(texture, Rect2(10, 140, 1235, 495), target, bounds, reversed, Color.WHITE, reversed)
 	var door_open: float = Transit.bus_doors(animation_time + (32.0 if reversed else 8.0))
 	var door_x := target.position.x + target.size.x * (0.65 if reversed else 0.35)
-	_draw_open_door(Rect2(door_x - 4.0 * door_open, target.position.y + target.size.y * 0.32, 8.0 * door_open, target.size.y * 0.45), bounds)
+	if not _entrance_covers_x(door_x, reversed):
+		_draw_open_door(Rect2(door_x - 4.0 * door_open, target.position.y + target.size.y * 0.32, 8.0 * door_open, target.size.y * 0.45), bounds)
 	# The sprite has fixed tyres; animated hub spokes track wheel travel, not time.
 	# Thus they turn in the correct direction and remain still while the bus waits.
 	var radius := target.size.y * 0.10
@@ -735,7 +783,7 @@ func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 	for fraction in [0.219, 0.687]:
 		var fx: float = 1.0 - fraction if reversed else fraction
 		var center := target.position + Vector2(target.size.x * fx, target.size.y * 0.842)
-		if center.x < radius or center.x > bounds.x - radius: continue
+		if center.x < radius or center.x > bounds.x - radius or _entrance_covers_x(center.x, reversed): continue
 		draw_circle(center, radius * 0.72, Color("59626d"))
 		draw_circle(center, radius * 0.53, Color("a8adb0"))
 		for i in range(4):
@@ -747,13 +795,13 @@ func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 func _draw_car(target: Rect2, bounds: Vector2, reversed: bool, signalling: bool) -> void:
 	var texture: Texture2D = vehicles_reversed if reversed else VEHICLES
 	target.position.y += sin(target.position.x * 0.09) * 0.35
-	_draw_vehicle(texture, Rect2(1285, 320, 875, 320), target, bounds, reversed)
+	_draw_vehicle(texture, Rect2(1285, 320, 875, 320), target, bounds, reversed, Color.WHITE, reversed)
 	var radius := target.size.y * 0.12
 	var angle := target.position.x / radius
 	for fraction in [0.20, 0.78]:
 		var fx: float = 1.0 - fraction if reversed else fraction
 		var center := target.position + Vector2(target.size.x * fx, target.size.y * 0.79)
-		if center.x < radius or center.x > bounds.x - radius: continue
+		if center.x < radius or center.x > bounds.x - radius or _entrance_covers_x(center.x, reversed): continue
 		draw_circle(center, radius * 0.72, Color("34414a"))
 		for i in range(5):
 			var a := angle + i * TAU / 5.0
@@ -762,7 +810,7 @@ func _draw_car(target: Rect2, bounds: Vector2, reversed: bool, signalling: bool)
 		draw_circle(center, radius * 0.16, Color("d1d2ca"))
 	if signalling and fposmod(animation_time, 1.0) < 0.55:
 		var light_x := target.position.x + target.size.x * (0.96 if reversed else 0.04)
-		if light_x >= 0.0 and light_x <= bounds.x:
+		if light_x >= 0.0 and light_x <= bounds.x and not _entrance_covers_x(light_x, reversed):
 			draw_circle(Vector2(light_x, target.position.y + target.size.y * 0.57), 2.2, Color(1.0, 0.63, 0.18, 0.35))
 			draw_rect(Rect2(light_x - 1.2, target.position.y + target.size.y * 0.57 - 0.7, 2.4, 1.4), Color("ffbe45"))
 
@@ -823,8 +871,22 @@ func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
 		distance = lerpf(stop_distance, scene_width + 210.0, t * t)
 	return scene_width - distance - 185.0 if reversed else distance
 
+func _draw_escalator_wall_patches() -> void:
+	# Restore the old stairwell wall underneath the moved escalators.
+	var left := PackedVector2Array([Vector2(132, 568), Vector2(199, 568), Vector2(299, 667), Vector2(311, 667), Vector2(317, 673), Vector2(317, 683), Vector2(311, 691), Vector2(260, 691)])
+	var right := PackedVector2Array()
+	for point in left: right.append(Vector2(2172.0 - point.x, point.y))
+	_draw_wall_shape(left, Vector2(800, 0))
+	_draw_wall_shape(right, Vector2(-800, 0))
+
+func _draw_wall_shape(points: PackedVector2Array, source_offset: Vector2) -> void:
+	var uvs := PackedVector2Array()
+	for point in points: uvs.append((point + source_offset) / BACKDROP.get_size())
+	draw_polygon(points, PackedColorArray([Color.WHITE]), uvs, BACKDROP)
+
 func _draw_compact_escalators() -> void:
-	if display_mode != "sky": return
+	var shift := _current_station_shift()
+	if shift <= 0.01: return
 	# Move both complete staircases with the entrances into the cropped view.
 	var left := PackedVector2Array([
 		Vector2(132, 568), Vector2(199, 568), Vector2(299, 667),
@@ -832,12 +894,12 @@ func _draw_compact_escalators() -> void:
 		Vector2(311, 691), Vector2(260, 691)])
 	var right := PackedVector2Array()
 	for point in left: right.append(Vector2(2172.0 - point.x, point.y))
-	_draw_backdrop_shape(left, Vector2(COMPACT_STATION_SHIFT, 0))
-	_draw_backdrop_shape(right, Vector2(-COMPACT_STATION_SHIFT, 0))
+	_draw_backdrop_shape(left, Vector2(shift, 0))
+	_draw_backdrop_shape(right, Vector2(-shift, 0))
 
 func _draw_foreground() -> void:
 	# Only redraw station silhouettes, so the road around them never clips cars.
-	var shift := COMPACT_STATION_SHIFT if display_mode == "sky" else 0.0
+	var shift := _current_station_shift()
 	_draw_backdrop_shape(PackedVector2Array([
 		Vector2(32, 484), Vector2(52, 470), Vector2(268, 473),
 		Vector2(415, 554), Vector2(46, 554), Vector2(46, 484)]), Vector2(shift, 0))
