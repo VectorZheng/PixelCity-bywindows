@@ -13,7 +13,8 @@ func _init() -> void:
 			"direction": 1 if i % 2 == 0 else -1, "state": "walk", "timer": 0.0,
 			"cooldown": 0.0, "umbrella": i % 2 == 0, "mood": "开心",
 			"walk_distance": 0.0, "moving": false, "idle_due": 8.0 + i * 3.7,
-			"sit": 0.0, "wait_cooldown": 0.0, "wait_at_stop": i == 0})
+			"sit": 0.0, "wait_cooldown": 0.0, "wait_at_stop": i == 0,
+			"umbrella_open": 1.0, "stop_cooldown": 0.0})
 
 func step(delta: float, seconds: float, raining: bool) -> void:
 	# Substep long frames rather than discarding elapsed time. Use the matching
@@ -40,6 +41,59 @@ func _step_once(dt: float, seconds: float, raining: bool) -> void:
 func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool) -> void:
 	p.cooldown = maxf(0.0, p.cooldown - dt)
 	p.wait_cooldown = maxf(0.0, p.wait_cooldown - dt)
+	p.stop_cooldown = maxf(0.0, p.stop_cooldown - dt)
+	# A second commuter arrives with an umbrella, folds it, then reads the sign.
+	if p.state in ["fold_umbrella", "look_board"]:
+		p.timer -= dt
+		if p.state == "fold_umbrella":
+			p.umbrella_open = clampf(p.timer / 2.0, 0.0, 1.0)
+			if p.timer <= 0.0:
+				p.state = "look_board"
+				p.timer = 5.0
+		else:
+			p.umbrella_open = 0.0
+			if p.timer <= 0.0:
+				p.state = "walk"
+				p.stop_cooldown = 30.0
+		return
+	p.umbrella_open = move_toward(p.umbrella_open, 1.0, dt * 0.7)
+	if raining and p.id == 2 and p.stop_cooldown <= 0.0:
+		p.state = "approach_stop"
+		p.mood = "期待"
+		p.direction = 1
+		p.x = move_toward(p.x, 1120.0, 12.0 * dt)
+		if absf(p.x - 1120.0) < 0.5:
+			p.state = "fold_umbrella"
+			p.timer = 2.0
+		return
+	if p.state == "car_boarding":
+		p.timer -= dt
+		if p.timer <= 0.0:
+			p.state = "car_onboard"
+			p.timer = 20.0
+		return
+	if p.state == "car_onboard":
+		p.timer -= dt
+		if p.timer <= 0.0 and fposmod(seconds, 60.0) >= 25.0 and fposmod(seconds, 60.0) < 30.0:
+			p.state = "car_exit"
+			p.timer = 2.0
+		return
+	if p.state == "car_exit":
+		p.timer -= dt
+		if p.timer <= 0.0:
+			p.state = "walk"
+			p.stop_cooldown = 20.0
+		return
+	var pickup_phase := fposmod(seconds, 60.0)
+	if p.id == 4 and p.stop_cooldown <= 0.0 and pickup_phase >= 12.0 and pickup_phase < 31.0:
+		p.state = "car_pickup"
+		p.mood = "期待"
+		if absf(p.x - 1340.0) > 0.5: p.direction = 1 if 1340.0 > p.x else -1
+		p.x = move_toward(p.x, 1340.0, 15.0 * dt)
+		if pickup_phase >= 26.0 and absf(p.x - 1340.0) < 1.0:
+			p.state = "car_boarding"
+			p.timer = 2.0
+		return
 	if p.state in ["greet", "boarding", "onboard", "idle"]:
 		p.timer -= dt
 		if p.state == "boarding":

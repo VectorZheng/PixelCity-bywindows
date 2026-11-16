@@ -28,7 +28,7 @@ func _initialize() -> void:
 	sim.step(0.1, 10.0, true)
 	assert(shelter.state == "shelter" and shelter.mood == "避雨")
 	assert(absf(shelter.x - 1028.0) < absf(original_x - 1028.0))
-	assert(sim.people[2].state == "walk" and sim.people[2].mood == "下雨")
+	assert(sim.people[2].state == "approach_stop" and sim.people[2].mood == "期待")
 	sim.step(0.1, 11.0, false)
 	assert(shelter.state == "walk")
 	var march: Dictionary = sim.people[6]
@@ -95,5 +95,27 @@ func _initialize() -> void:
 	assert(rain_waiter.state == "shelter" and rain_waiter.sit > 0.99)
 	for i in range(10): rain_sim.step(0.1, 7.0 + i * 0.1, false)
 	assert(is_zero_approx(rain_waiter.sit) and rain_waiter.state == "walk")
+	# Rain commuter folds the umbrella, reads the board, then can leave.
+	var activity_sim = Residents.new()
+	var reader: Dictionary = activity_sim.people[2]
+	reader.x = 1120.0
+	activity_sim.step(0.1, 10.0, true)
+	assert(reader.state == "fold_umbrella")
+	for i in range(10): activity_sim.step(0.1, 10.1 + i * 0.1, true)
+	assert(reader.umbrella_open > 0.0 and reader.umbrella_open < 1.0)
+	for i in range(15): activity_sim.step(0.1, 11.1 + i * 0.1, true)
+	assert(reader.state == "look_board" and is_zero_approx(reader.umbrella_open))
+	for i in range(55): activity_sim.step(0.1, 12.6 + i * 0.1, true)
+	assert(reader.state == "walk" and reader.stop_cooldown > 0.0)
+	# One unique commuter approaches the stopped car and boards it.
+	var pickup_sim = Residents.new()
+	var rider: Dictionary = pickup_sim.people[4]
+	rider.x = 1340.0
+	pickup_sim.step(0.1, 26.0, false)
+	assert(rider.state == "car_boarding")
+	for i in range(22): pickup_sim.step(0.1, 26.1 + i * 0.1, false)
+	assert(rider.state == "car_onboard")
+	for i in range(600): pickup_sim.step(0.1, 28.3 + i * 0.1, false)
+	assert(rider.state == "walk" and rider.stop_cooldown > 0.0)
 	print("RESIDENT_TEST_PASSED")
 	quit(0)

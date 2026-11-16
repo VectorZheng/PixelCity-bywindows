@@ -165,7 +165,7 @@ func _build_panel() -> void:
 	_mode_select.add_item("填充屏幕（保持比例，可能裁切）")
 	_mode_select.add_item("完整显示（保持比例，可能留边）")
 	_mode_select.add_item("拉伸铺满（可能变形）")
-	_mode_select.add_item("城市放大（两侧少量裁切）")
+	_mode_select.add_item("城市放大（两侧裁切）")
 	_mode_select.select(_mode_index(display_mode))
 	_mode_select.item_selected.connect(_on_display_mode_selected)
 	column.add_child(_mode_select)
@@ -244,7 +244,7 @@ func _draw_lightning(size: Vector2, target: Rect2) -> void:
 	var pulse := fposmod(animation_time, 19.0)
 	if pulse >= 0.22: return
 	var intensity := 0.12 * (1.0 - pulse / 0.22)
-	var ground_y := clampf(target.position.y + target.size.y * 535.0 / 724.0, 0.0, size.y)
+	var ground_y := clampf(target.position.y + target.size.y * 560.0 / 724.0, 0.0, size.y)
 	draw_rect(Rect2(0, 0, size.x, ground_y), Color(0.75, 0.83, 1.0, intensity))
 	var x := size.x * 0.68
 	var top := maxf(0.0, target.position.y * 0.45)
@@ -263,7 +263,7 @@ func _sync_weather_effects() -> void:
 	var size := get_viewport_rect().size
 	var target := _display_rect(size, BACKDROP.get_size(), display_mode)
 	# Street is the exposed surface; don't let precipitation fall into the subway.
-	var ground_y := clampf(target.position.y + target.size.y * 535.0 / 724.0, 1.0, size.y)
+	var ground_y := clampf(target.position.y + target.size.y * 560.0 / 724.0, 1.0, size.y)
 	var weather_size := Vector2(size.x, ground_y)
 	rain_fx.size = weather_size
 	snow_fx.size = weather_size
@@ -275,6 +275,7 @@ func _sync_weather_effects() -> void:
 	var scene_scale := target.size / BACKDROP.get_size()
 	var near_roof := Rect2(target.position + Vector2(990, 475) * scene_scale, Vector2(190, 82) * scene_scale)
 	var far_roof := Rect2(target.position + Vector2(380, 410) * scene_scale, Vector2(155, 56) * scene_scale)
+	rain_fx.set_param(&"scene_transform", Vector4(target.position.x, target.position.y, scene_scale.x, scene_scale.y))
 	rain_fx.set_param(&"shelter_a", Vector4(near_roof.position.x, near_roof.position.y, near_roof.end.x, near_roof.end.y))
 	rain_fx.set_param(&"shelter_b", Vector4(far_roof.position.x, far_roof.position.y, far_roof.end.x, far_roof.end.y))
 	rain_fx.visible = _is_raining()
@@ -340,15 +341,17 @@ func _draw_promenade_people() -> void:
 	draw_rect(Rect2(414, 449, 3, 8), Color("283047"))
 	draw_rect(Rect2(473, 449, 3, 8), Color("283047"))
 	for person in residents.people:
-		if person.promenade and person.state != "onboard":
+		if person.promenade and person.state not in ["onboard", "car_onboard"]:
 			_draw_resident(person, 465.0, 0.78)
 
 func _draw_people(platform: bool, boarding_only: bool = false) -> void:
 	for person in residents.people:
-		if person.platform != platform or person.promenade or person.state == "onboard": continue
+		if person.platform != platform or person.promenade or person.state in ["onboard", "car_onboard"]: continue
 		if platform and ((person.state == "boarding") != boarding_only): continue
 		var y: float = (692.0 + (person.id % 2) * 3.0) if platform else (555.0 + (person.id % 3) * 2.0)
 		if person.state == "boarding": y = lerpf(y, 675.0 if platform else 515.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+		if person.state == "car_boarding": y = lerpf(y, 480.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+		if person.state == "car_exit": y = lerpf(480.0, y, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 		_draw_resident(person, y, 1.0)
 
 func _draw_resident(person: Dictionary, y: float, scale: float) -> void:
@@ -357,14 +360,22 @@ func _draw_resident(person: Dictionary, y: float, scale: float) -> void:
 	_draw_person(pos, phase, person, scale)
 	if person.state == "greet":
 		draw_line(pos + Vector2(person.direction * 4, -21) * scale, pos + Vector2(person.direction * 11, -29) * scale, Color("edb69a"), 2.0 * scale)
-	if _is_raining() and not person.platform and person.umbrella and person.state != "wait_bus" and person.sit < 0.05:
-		_draw_umbrella(pos + Vector2(0, -34 * scale), scale, person.id)
+	if _is_raining() and not person.platform and person.umbrella and person.state not in ["wait_bus", "car_boarding", "car_exit"] and person.sit < 0.05:
+		if person.state == "look_board":
+			# Closed umbrella hangs at the person's side.
+			draw_line(pos + Vector2(-7, -18) * scale, pos + Vector2(-9, -2) * scale, Color("53697d"), 2.0 * scale)
+		else:
+			_draw_umbrella(pos + Vector2(0, -34 * scale), scale, person.id, person.umbrella_open)
+	if person.state == "look_board":
+		# A small gesture and periodic head tilt make reading the display legible.
+		var reach := 1.5 * sin(animation_time * 1.8)
+		draw_line(pos + Vector2(3, -22) * scale, pos + Vector2(8, -25 + reach) * scale, Color("d8a18c"), 1.5 * scale)
 	if person.state == "greet" or fposmod(animation_time + person.id * 2.3, 24.0) < 2.0:
 		_draw_mood(pos + Vector2(0, (-52.0 if _is_raining() and person.umbrella else -39.0) * scale), person.mood)
 
 func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) -> void:
 	var variant: int = person.character_id
-	var walking: bool = person.moving and person.state in ["walk", "boarding", "shelter", "wait_bus"]
+	var walking: bool = person.moving and person.state in ["walk", "boarding", "car_boarding", "car_pickup", "shelter", "wait_bus", "approach_stop"]
 	var sheet_index := floori(float(variant) / 4.0)
 	var sheet: Texture2D = walk_sheets[sheet_index]
 	var cell := Vector2(sheet.get_width() / 4.0, sheet.get_height() / 4.0)
@@ -374,7 +385,8 @@ func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) ->
 	if person.direction < 0:
 		texture = walk_sheets_reversed[sheet_index]
 		source.position.x = sheet.get_width() - source.end.x
-	var fade := clampf(person.timer / 2.0, 0.0, 1.0) if person.state == "boarding" else 1.0
+	var fade := clampf(person.timer / 2.0, 0.0, 1.0) if person.state in ["boarding", "car_boarding"] else 1.0
+	if person.state == "car_exit": fade = 1.0 - clampf(person.timer / 2.0, 0.0, 1.0)
 	# A small grounding shadow makes the walking layer sit on the pavement.
 	draw_ellipse_shadow(pos, scale, fade)
 	if walking and person.sit <= 0.01:
@@ -411,7 +423,7 @@ func draw_ellipse_shadow(pos: Vector2, scale: float, opacity: float) -> void:
 	var points := PackedVector2Array([pos + Vector2(-8, -1) * scale, pos + Vector2(-5, -3) * scale, pos + Vector2(5, -3) * scale, pos + Vector2(8, -1) * scale, pos + Vector2(5, 1) * scale, pos + Vector2(-5, 1) * scale])
 	draw_colored_polygon(points, Color(0.03, 0.04, 0.08, 0.28 * opacity))
 
-func _draw_umbrella(pos: Vector2, scale: float, id: int) -> void:
+func _draw_umbrella(pos: Vector2, scale: float, id: int, openness: float = 1.0) -> void:
 	# A rim, curved panels and ribs read better at the tiny on-screen scale.
 	var colors := [Color("c86572"), Color("59879a"), Color("cf9a55"), Color("9d7cab")]
 	var base: Color = colors[(id / 2) % colors.size()]
@@ -419,18 +431,22 @@ func _draw_umbrella(pos: Vector2, scale: float, id: int) -> void:
 	var edge := Color("493843")
 	var outline := PackedVector2Array([Vector2(-16, 7), Vector2(-14, 2), Vector2(-10, -4), Vector2(-5, -7), Vector2(0, -8), Vector2(5, -7), Vector2(10, -4), Vector2(14, 2), Vector2(16, 7), Vector2(10, 6), Vector2(5, 8), Vector2(0, 6), Vector2(-5, 8), Vector2(-10, 6)])
 	var fill := PackedVector2Array()
-	for point in outline: fill.append(pos + point * scale)
+	for point in outline: fill.append(_umbrella_point(pos, point, scale, openness))
 	draw_colored_polygon(fill, edge)
 	var panel := PackedVector2Array([Vector2(-14, 5), Vector2(-11, 0), Vector2(-7, -4), Vector2(0, -6), Vector2(7, -4), Vector2(11, 0), Vector2(14, 5), Vector2(9, 4), Vector2(5, 6), Vector2(0, 4), Vector2(-5, 6), Vector2(-9, 4)])
 	var panel_points := PackedVector2Array()
-	for point in panel: panel_points.append(pos + point * scale)
+	for point in panel: panel_points.append(_umbrella_point(pos, point, scale, openness))
 	draw_colored_polygon(panel_points, base)
-	draw_line(pos + Vector2(0, -6) * scale, pos + Vector2(-5, 5) * scale, shadow, 1.1 * scale)
-	draw_line(pos + Vector2(0, -6) * scale, pos + Vector2(5, 5) * scale, shadow, 1.1 * scale)
-	draw_line(pos + Vector2(-7, -2) * scale, pos + Vector2(-10, 2) * scale, base.lightened(0.35), 1.2 * scale)
+	draw_line(_umbrella_point(pos, Vector2(0, -6), scale, openness), _umbrella_point(pos, Vector2(-5, 5), scale, openness), shadow, 1.1 * scale)
+	draw_line(_umbrella_point(pos, Vector2(0, -6), scale, openness), _umbrella_point(pos, Vector2(5, 5), scale, openness), shadow, 1.1 * scale)
+	draw_line(_umbrella_point(pos, Vector2(-7, -2), scale, openness), _umbrella_point(pos, Vector2(-10, 2), scale, openness), base.lightened(0.35), 1.2 * scale)
 	draw_line(pos + Vector2(0, 5) * scale, pos + Vector2(0, 17) * scale, edge, 1.4 * scale)
 	draw_arc(pos + Vector2(2, 17) * scale, 2.0 * scale, 0.0, PI, 5, edge, 1.1 * scale)
 	draw_rect(Rect2(pos + Vector2(-1, -9) * scale, Vector2(2, 2) * scale), base.lightened(0.45))
+
+func _umbrella_point(origin: Vector2, point: Vector2, scale: float, openness: float) -> Vector2:
+	var width := lerpf(0.1, 1.0, openness)
+	return origin + Vector2(point.x * width, point.y + (1.0 - openness) * 10.0) * scale
 
 func _draw_mood(pos: Vector2, mood: String) -> void:
 	# Draw a small coloured emoji so it remains visible without an emoji font.
@@ -482,9 +498,9 @@ func _display_rect(view: Vector2, artwork: Vector2, mode: String) -> Rect2:
 	var factor := minf(view.x / artwork.x, view.y / artwork.y) if mode in ["fit", "sky"] else maxf(view.x / artwork.x, view.y / artwork.y)
 	var output := artwork * factor
 	if mode == "sky":
-		# Enlarge the scene by up to 20%, keeping the same scale on both axes.
-		# At 16:10 this trims about 8% from each side and reduces empty sky.
-		factor = minf(factor * 1.2, view.y / artwork.y)
+		# Enlarge uniformly and anchor the city to the bottom of the screen.
+		# The sides crop on normal displays, leaving less empty sky.
+		factor = minf(factor * 1.65, view.y / artwork.y)
 		output = artwork * factor
 		return Rect2(Vector2((view.x - output.x) / 2.0, view.y - output.y), output)
 	return Rect2((view - output) / 2.0, output)
@@ -569,21 +585,30 @@ func _draw_road_edges(width: float) -> void:
 		draw_line(Vector2(x + 55, 532), Vector2(minf(x + 103, width), 532), Color(0.94, 0.83, 0.69, 0.48), 1.4)
 
 func _car_x(seconds: float, scene_width: float, reversed: bool) -> float:
-	# Independent constant-speed loops; wrapping occurs beyond the visible edges.
+	# The far car slows for a pickup, waits, and accelerates back into traffic.
+	if not reversed:
+		var phase := fposmod(seconds, 60.0)
+		if phase < 25.0:
+			var t := phase / 25.0
+			return lerpf(-210.0, 1300.0, 1.0 - pow(1.0 - t, 1.35))
+		if phase < 33.0: return 1300.0
+		var t := (phase - 33.0) / 27.0
+		return lerpf(1300.0, scene_width + 210.0, t * t)
 	var ring := scene_width + 420.0
-	if reversed:
-		return scene_width + 25.0 - fposmod(seconds * 64.0 - 535.0, ring)
-	return fposmod(seconds * 65.0 - 174.0, ring) - 210.0
+	var distance := seconds * 65.0 + 68.0 * sin(seconds * 0.16)
+	return scene_width + 25.0 - fposmod(distance - 535.0, ring)
 
 func _passing_lane_amount(car_x: float, bus_x: float, reversed: bool) -> float:
 	# Shift into the further lane before reaching the bus, then smoothly return.
-	var bus_width := 170.0 if reversed else 185.0
+	var bus_width := 170.0 if reversed else 160.0
 	var direction := -1.0 if reversed else 1.0
 	var relative := (car_x + 40.0 - (bus_x + bus_width / 2.0)) * direction
 	return smoothstep(-240.0, -130.0, relative) * (1.0 - smoothstep(125.0, 210.0, relative))
 
 func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 	var texture: Texture2D = vehicles_reversed if reversed else VEHICLES
+	# Subtle suspension motion is driven by distance, so it stops with the bus.
+	target.position.y += sin(target.position.x * 0.075) * 0.45
 	_draw_vehicle(texture, Rect2(10, 140, 1235, 495), target, bounds, reversed)
 	var door_open: float = Transit.bus_doors(animation_time + (32.0 if reversed else 8.0))
 	var door_x := target.position.x + target.size.x * (0.65 if reversed else 0.35)
@@ -604,6 +629,28 @@ func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 			draw_line(center - offset, center + offset, Color("333e4b"), 1.0)
 		draw_circle(center, radius * 0.16, Color("263340"))
 
+func _draw_car(target: Rect2, bounds: Vector2, reversed: bool, signalling: bool) -> void:
+	var texture: Texture2D = vehicles_reversed if reversed else VEHICLES
+	target.position.y += sin(target.position.x * 0.09) * 0.35
+	_draw_vehicle(texture, Rect2(1285, 320, 875, 320), target, bounds, reversed)
+	var radius := target.size.y * 0.12
+	var angle := target.position.x / radius
+	for fraction in [0.20, 0.78]:
+		var fx: float = 1.0 - fraction if reversed else fraction
+		var center := target.position + Vector2(target.size.x * fx, target.size.y * 0.79)
+		if center.x < radius or center.x > bounds.x - radius: continue
+		draw_circle(center, radius * 0.72, Color("34414a"))
+		for i in range(5):
+			var a := angle + i * TAU / 5.0
+			var tip := Vector2(cos(a), sin(a)) * radius * 0.62
+			draw_line(center, center + tip, Color("c1c5c5"), 0.8)
+		draw_circle(center, radius * 0.16, Color("d1d2ca"))
+	if signalling and fposmod(animation_time, 1.0) < 0.55:
+		var light_x := target.position.x + target.size.x * (0.96 if reversed else 0.04)
+		if light_x >= 0.0 and light_x <= bounds.x:
+			draw_circle(Vector2(light_x, target.position.y + target.size.y * 0.57), 2.2, Color(1.0, 0.63, 0.18, 0.35))
+			draw_rect(Rect2(light_x - 1.2, target.position.y + target.size.y * 0.57 - 0.7, 2.4, 1.4), Color("ffbe45"))
+
 func _draw_traffic(bounds: Vector2) -> void:
 	var far_bus_x := _bus_x(animation_time + 8.0, bounds.x, false)
 	var near_bus_x := _bus_x(animation_time + 32.0, bounds.x, true)
@@ -612,10 +659,10 @@ func _draw_traffic(bounds: Vector2) -> void:
 	var far_offset := _passing_lane_amount(far_car_x, far_bus_x, false) * 10.0
 	var near_offset := _passing_lane_amount(near_car_x, near_bus_x, true) * 10.0
 	# The passing lane is farther away, so the car is drawn beneath its bus.
-	_draw_vehicle(VEHICLES, Rect2(1285, 320, 875, 320), Rect2(far_car_x, 463 - far_offset, 80, 27), bounds)
-	_draw_bus(Rect2(far_bus_x, 434, 185, 56), bounds, false)
-	_draw_vehicle(vehicles_reversed, Rect2(1285, 320, 875, 320), Rect2(near_car_x, 504 - near_offset, 80, 26), bounds, true)
-	_draw_bus(Rect2(near_bus_x, 483, 170, 47), bounds, true)
+	_draw_car(Rect2(far_car_x, 460 - far_offset, 80, 29.3), bounds, false, far_offset > 1.0 or fposmod(animation_time, 60.0) >= 22.0 and fposmod(animation_time, 60.0) < 35.0)
+	_draw_bus(Rect2(far_bus_x, 426, 160, 64.1), bounds, false)
+	_draw_car(Rect2(near_car_x, 501 - near_offset, 88, 32.2), bounds, true, near_offset > 1.0)
+	_draw_bus(Rect2(near_bus_x, 465, 170, 68.1), bounds, true)
 	# Visual simulation: the train runs on the rails, not the walking surface.
 	var train_target := Rect2(_train_x(animation_time, bounds.x), 658, 660, 51)
 	_draw_vehicle(METRO, METRO_SOURCE, train_target, bounds)
@@ -661,14 +708,21 @@ func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
 	return scene_width - distance - 185.0 if reversed else distance
 
 func _draw_foreground() -> void:
-	# Draw the street-side structures in front of traffic; cars must not pass over
-	# a station entrance or the back of the near-side bus shelter.
-	for region in [Rect2(0, 470, 420, 94)]:
-		draw_texture_rect_region(BACKDROP, region, region)
-	# Only use the corrected right entrance patch; the approved skyline is unchanged.
-	var right_region := Rect2(1755, 470, 417, 94)
-	draw_texture_rect_region(BACKDROP, right_region, right_region)
+	# Redraw only the entrance silhouettes, not the surrounding rectangular
+	# road: rectangular patches cut moving vehicles in half at both entrances.
+	_draw_station_foreground(PackedVector2Array([
+		Vector2(32, 484), Vector2(52, 470), Vector2(268, 473),
+		Vector2(415, 554), Vector2(46, 554), Vector2(46, 484)]))
+	_draw_station_foreground(PackedVector2Array([
+		Vector2(1756, 554), Vector2(1904, 473), Vector2(2120, 470),
+		Vector2(2140, 484), Vector2(2126, 484), Vector2(2126, 554)]))
 	_draw_bus_shelter()
+
+func _draw_station_foreground(points: PackedVector2Array) -> void:
+	var uvs := PackedVector2Array()
+	for point in points:
+		uvs.append(point / BACKDROP.get_size())
+	draw_polygon(points, PackedColorArray([Color.WHITE]), uvs, BACKDROP)
 
 func _draw_bus_shelter() -> void:
 	# The panes are transparent so the road remains visible through the shelter.
@@ -686,6 +740,9 @@ func _draw_bus_shelter() -> void:
 	draw_rect(Rect2(1134, 492, 21, 16), frame)
 	draw_rect(Rect2(1137, 495, 15, 2), Color("e2a779"))
 	draw_rect(Rect2(1137, 500, 11, 2), Color("b5b8b7"))
+	var bus_phase := fposmod(animation_time + 32.0, 70.0)
+	var arrival := 0 if bus_phase >= 25.0 and bus_phase < 33.0 else ceili(fposmod(26.0 - bus_phase, 70.0))
+	draw_string(_screen_font, Vector2(1137, 506), str(arrival) + "s", HORIZONTAL_ALIGNMENT_LEFT, 17, 6, Color("e5d4aa"))
 
 func _train_x(seconds: float, scene_width: float) -> float:
 	return Transit.train_position(seconds, scene_width)

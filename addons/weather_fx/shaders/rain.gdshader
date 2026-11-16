@@ -13,6 +13,8 @@ uniform float splashes : hint_range(0.0, 1.0) = 0.8;
 // Preview adaptation: stop the foreground rain inside the two bus shelters.
 uniform vec4 shelter_a = vec4(-1.0);
 uniform vec4 shelter_b = vec4(-1.0);
+// Screen origin and scale of the artwork, for the two sloped station roofs.
+uniform vec4 scene_transform = vec4(0.0, 0.0, 1.0, 1.0);
 
 // Streak alpha of one layer; depth 1 is nearest.
 float streaks(vec2 p, float depth, float time, int layer) {
@@ -90,6 +92,10 @@ void fragment() {
 	}
 	bool under_a = local.x >= shelter_a.x && local.x <= shelter_a.z && local.y >= shelter_a.y && local.y <= shelter_a.w;
 	bool under_b = local.x >= shelter_b.x && local.x <= shelter_b.z && local.y >= shelter_b.y && local.y <= shelter_b.w;
-	if (under_a || under_b) { a = 0.0; }
+	vec2 scene = (local - scene_transform.xy) / scene_transform.zw;
+	float roof_x = min(scene.x, 2172.0 - scene.x);
+	float roof_y = roof_x <= 268.0 ? 470.0 : 473.0 + (roof_x - 268.0) * (81.0 / 147.0);
+	bool under_entrance = roof_x >= 32.0 && roof_x <= 415.0 && scene.y >= roof_y && scene.y <= 560.0;
+	if (under_a || under_b || under_entrance) { a = 0.0; }
 	COLOR = wfx_finish(vec4(rgb, color.a * a), uv);
 }
