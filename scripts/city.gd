@@ -9,6 +9,12 @@ const WALK_FIVE: Texture2D = preload("res://assets/character-walk-five.png")
 const WALK_MORE: Texture2D = preload("res://assets/character-walk-more.png")
 const WALK_EXTRA: Texture2D = preload("res://assets/kyoto-star-walk.png")
 const VEHICLES: Texture2D = preload("res://assets/city-vehicles.png")
+const SU7_YELLOW: Texture2D = preload("res://assets/su7-yellow.png")
+const YU7_GREEN: Texture2D = preload("res://assets/yu7-green.png")
+# The transparent generated canvases contain padding; these rectangles retain
+# the complete opaque vehicles while excluding near-transparent edge noise.
+const SU7_SOURCE := Rect2(33, 49, 2106, 654)
+const YU7_SOURCE := Rect2(24, 64, 1941, 695)
 const CLOUD: Texture2D = preload("res://assets/weather-cloud.png")
 const UFO: Texture2D = preload("res://assets/ufo-cc0.png")
 const Residents = preload("res://scripts/residents.gd")
@@ -40,6 +46,7 @@ var _screen_font: SystemFont
 var walk_sheets: Array[Texture2D] = [WALK, WALK_EXTRA, WALK_MORE, WALK_FOUR, WALK_FIVE]
 var walk_sheets_reversed: Array[Texture2D] = []
 var vehicles_reversed: Texture2D
+var su7_reversed: Texture2D
 var residents = Residents.new()
 var rain_fx: WeatherFX
 var snow_fx: WeatherFX
@@ -56,6 +63,7 @@ func _ready() -> void:
 	for sheet in walk_sheets:
 		walk_sheets_reversed.append(_flip_texture(sheet))
 	vehicles_reversed = _flip_texture(VEHICLES)
+	su7_reversed = _flip_texture(SU7_YELLOW)
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT_SECONDS
 	add_child(_http)
@@ -89,6 +97,9 @@ func _capture_test() -> void:
 		capture_path = "user://preview-start.png"
 	else:
 		animation_time = 18.0
+	if OS.get_cmdline_user_args().has("--capture-cars"):
+		animation_time = 23.4
+		capture_path = "user://preview-cars.png"
 	if OS.get_cmdline_user_args().has("--capture-pass"):
 		animation_time = 20.0
 		capture_path = "user://preview-pass.png"
@@ -719,11 +730,11 @@ func _flip_texture(texture: Texture2D) -> Texture2D:
 	image.flip_x()
 	return ImageTexture.create_from_image(image)
 
-func _draw_vehicle(texture: Texture2D, source: Rect2, target: Rect2, bounds: Vector2, reversed: bool = false, modulate: Color = Color.WHITE, clip_compact: bool = false) -> void:
+func _draw_vehicle(texture: Texture2D, source: Rect2, target: Rect2, bounds: Vector2, reversed: bool = false, modulate: Color = Color.WHITE, clip_compact: bool = false, ground_traffic: bool = false) -> void:
 	# Ground traffic goes behind the full entrance footprint. Other layers,
 	# including trains and clouds, are clipped only to the scene boundaries.
 	var sections: Array[Rect2] = []
-	if (texture == VEHICLES or texture == vehicles_reversed) and (_current_station_shift() <= 0.01 or clip_compact):
+	if (ground_traffic or texture == VEHICLES or texture == vehicles_reversed) and (_current_station_shift() <= 0.01 or clip_compact):
 		sections = _vehicle_sections(target, bounds, _current_station_shift())
 	else:
 		var clipped := target.intersection(Rect2(Vector2.ZERO, bounds))
@@ -793,21 +804,28 @@ func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 		draw_circle(center, radius * 0.16, Color("263340"))
 
 func _draw_car(target: Rect2, bounds: Vector2, reversed: bool, signalling: bool) -> void:
-	var texture: Texture2D = vehicles_reversed if reversed else VEHICLES
+	# Near lane: yellow SU7 sedan; waterfront lane: green YU7 crossover.
+	var texture: Texture2D = su7_reversed if reversed else YU7_GREEN
+	var source: Rect2 = SU7_SOURCE if reversed else YU7_SOURCE
 	target.position.y += sin(target.position.x * 0.09) * 0.35
-	_draw_vehicle(texture, Rect2(1285, 320, 875, 320), target, bounds, reversed, Color.WHITE, reversed)
-	var radius := target.size.y * 0.12
-	var angle := target.position.x / radius
-	for fraction in [0.20, 0.78]:
+	_draw_vehicle(texture, source, target, bounds, reversed, Color.WHITE, reversed, true)
+	# The rims are redrawn above the baked tyres and rotate with travelled distance.
+	var radius := target.size.y * 0.16
+	var angle := target.position.x / maxf(radius, 1.0)
+	var wheel_positions: Array = [0.198, 0.815] if reversed else [0.212, 0.82]
+	var wheel_y := 0.76 if reversed else 0.75
+	for fraction in wheel_positions:
 		var fx: float = 1.0 - fraction if reversed else fraction
-		var center := target.position + Vector2(target.size.x * fx, target.size.y * 0.79)
+		var center := target.position + Vector2(target.size.x * fx, target.size.y * wheel_y)
 		if center.x < radius or center.x > bounds.x - radius or _entrance_covers_x(center.x, reversed): continue
-		draw_circle(center, radius * 0.72, Color("34414a"))
+		draw_circle(center, radius, Color("252d35"))
+		draw_circle(center, radius * 0.79, Color("78858b"))
+		draw_circle(center, radius * 0.63, Color("303b43"))
 		for i in range(5):
 			var a := angle + i * TAU / 5.0
-			var tip := Vector2(cos(a), sin(a)) * radius * 0.62
-			draw_line(center, center + tip, Color("c1c5c5"), 0.8)
-		draw_circle(center, radius * 0.16, Color("d1d2ca"))
+			var tip := Vector2(cos(a), sin(a)) * radius * 0.72
+			draw_line(center, center + tip, Color("c5cccb"), 0.8)
+		draw_circle(center, radius * 0.17, Color("cbd1cb"))
 	if signalling and fposmod(animation_time, 1.0) < 0.55:
 		var light_x := target.position.x + target.size.x * (0.96 if reversed else 0.04)
 		if light_x >= 0.0 and light_x <= bounds.x and not _entrance_covers_x(light_x, reversed):
@@ -822,9 +840,9 @@ func _draw_traffic(bounds: Vector2) -> void:
 	var far_offset := _passing_lane_amount(far_car_x, far_bus_x, false) * 10.0
 	var near_offset := _passing_lane_amount(near_car_x, near_bus_x, true) * 10.0
 	# The passing lane is farther away, so the car is drawn beneath its bus.
-	_draw_car(Rect2(far_car_x, 460 - far_offset, 80, 29.3), bounds, false, far_offset > 1.0 or fposmod(animation_time, 60.0) >= 22.0 and fposmod(animation_time, 60.0) < 35.0)
+	_draw_car(Rect2(far_car_x, 458.5 - far_offset, 88, 31.5), bounds, false, far_offset > 1.0 or fposmod(animation_time, 60.0) >= 22.0 and fposmod(animation_time, 60.0) < 35.0)
 	_draw_bus(Rect2(far_bus_x, 426, 160, 64.1), bounds, false)
-	_draw_car(Rect2(near_car_x, 501 - near_offset, 88, 32.2), bounds, true, near_offset > 1.0)
+	_draw_car(Rect2(near_car_x, 504.7 - near_offset, 91, 28.3), bounds, true, near_offset > 1.0)
 	_draw_bus(Rect2(near_bus_x, 465, 170, 68.1), bounds, true)
 	# Visual simulation: the train runs on the rails, not the walking surface.
 	var train_target := Rect2(_train_x(animation_time, bounds.x), 658, 660, 51)

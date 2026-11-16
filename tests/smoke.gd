@@ -19,6 +19,10 @@ func _initialize() -> void:
 	assert(city._visual_weather_code() == 45)
 	city.weather_override = -1
 	assert(city._visual_weather_code() == 2)
+	# Both vehicle cutouts retain their own source rectangles and proportions.
+	assert(city.SU7_YELLOW.get_width() >= city.SU7_SOURCE.end.x)
+	assert(city.YU7_GREEN.get_width() >= city.YU7_SOURCE.end.x)
+	assert(city.SU7_SOURCE.size.x / city.SU7_SOURCE.size.y > city.YU7_SOURCE.size.x / city.YU7_SOURCE.size.y)
 	var view := Vector2(1920, 1080)
 	var image_size := Vector2(2172, 724)
 	var fit: Rect2 = city._display_rect(view, image_size, "fit")
