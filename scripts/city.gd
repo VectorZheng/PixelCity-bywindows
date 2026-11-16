@@ -108,6 +108,15 @@ func _capture_test() -> void:
 		weather = {"code": 45}
 		_sync_weather_effects()
 		capture_path = "user://preview-fog.png"
+	if OS.get_cmdline_user_args().has("--capture-far-stop"):
+		animation_time = 20.0
+		for entry in [[8, 736.0], [9, 711.0]]:
+			var far_person: Dictionary = residents.people[entry[0]]
+			far_person.x = entry[1]
+			far_person.state = "wait_bus" if entry[0] == 8 else "shelter"
+			far_person.sit = 1.0
+			far_person.moving = false
+		capture_path = "user://preview-far-stop.png"
 	if OS.get_cmdline_user_args().has("--capture-wait"):
 		var person: Dictionary = residents.people[0]
 		person.x = 1046.0
@@ -319,7 +328,7 @@ func _sync_weather_effects() -> void:
 	rain_fx.set_param(&"density", rain_density)
 	var scene_scale := target.size / BACKDROP.get_size()
 	var near_roof := Rect2(target.position + Vector2(990, 475) * scene_scale, Vector2(190, 82) * scene_scale)
-	var far_roof := Rect2(target.position + Vector2(380, 410) * scene_scale, Vector2(155, 56) * scene_scale)
+	var far_roof := Rect2(target.position + Vector2(Residents.FAR_SHELTER_X, 412) * scene_scale, Vector2(170, 53) * scene_scale)
 	rain_fx.set_param(&"entrance_offset", COMPACT_STATION_SHIFT if display_mode == "sky" else 0.0)
 	rain_fx.set_param(&"scene_transform", Vector4(target.position.x, target.position.y, scene_scale.x, scene_scale.y))
 	rain_fx.set_param(&"shelter_a", Vector4(near_roof.position.x, near_roof.position.y, near_roof.end.x, near_roof.end.y))
@@ -382,13 +391,27 @@ func _draw_station_screens() -> void:
 		draw_string(_screen_font, Vector2(x + 4, 628), _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 124, 11, Color("f6bb73"))
 
 func _draw_promenade_people() -> void:
-	# A low bench on the waterfront stop gives rain shelter a visible destination.
-	draw_rect(Rect2(405, 446, 80, 3), Color("b97759"))
-	draw_rect(Rect2(414, 449, 3, 8), Color("283047"))
-	draw_rect(Rect2(473, 449, 3, 8), Color("283047"))
+	# The waterfront shelter is drawn in front of the background and behind traffic.
+	var x: float = Residents.FAR_SHELTER_X
+	var frame := Color("283047")
+	draw_rect(Rect2(x + 5, 422, 160, 38), Color(0.15, 0.23, 0.34, 0.30))
+	draw_colored_polygon(PackedVector2Array([Vector2(x, 422), Vector2(x + 8, 413), Vector2(x + 162, 413), Vector2(x + 170, 422)]), frame)
+	draw_rect(Rect2(x + 3, 420, 164, 3), Color("697082"))
+	for dx in [6, 58, 110, 164]: draw_rect(Rect2(x + dx, 423, 3, 38), frame)
+	draw_rect(Rect2(x + 4, 459, 162, 3), frame)
+	draw_rect(Rect2(x + 25, 446, 85, 3), Color("b97759"))
+	draw_rect(Rect2(x + 30, 449, 3, 10), frame)
+	draw_rect(Rect2(x + 103, 449, 3, 10), frame)
+	var arrival: int = Transit.bus_arrival_seconds(animation_time + 8.0)
+	var arrival_text := "到站" if arrival == 0 else str(arrival) + "秒"
+	draw_rect(Rect2(x + 117, 425, 44, 20), Color("142332"))
+	draw_string(_screen_font, Vector2(x + 119, 433), "模拟3路", HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color("f6cf8a"))
+	draw_string(_screen_font, Vector2(x + 119, 442), arrival_text, HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color("e9f2df"))
 	for person in residents.people:
 		if person.promenade and person.state not in ["onboard", "car_onboard"]:
-			_draw_resident(person, 465.0, 0.78)
+			var y := 465.0
+			if person.state == "boarding": y = lerpf(y, 478.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+			_draw_resident(person, y, 0.78)
 
 func _draw_people(platform: bool, boarding_only: bool = false) -> void:
 	for person in residents.people:
@@ -452,12 +475,12 @@ func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) ->
 	if person.sit < 0.99:
 		draw_texture_rect_region(texture, Rect2(pos.x - 13 * scale, pos.y - 36 * scale, 27 * scale, 36 * scale), source, Color(1, 1, 1, fade * (1.0 - person.sit)))
 	if person.sit > 0.01:
-		_draw_back_waiter(pos, person, scale, person.sit, fade * person.sit)
+		_draw_back_waiter(pos, person, scale, person.sit, fade * person.sit, person.promenade)
 
-func _draw_back_waiter(pos: Vector2, person: Dictionary, scale: float, seated: float, opacity: float) -> void:
+func _draw_back_waiter(pos: Vector2, person: Dictionary, scale: float, seated: float, opacity: float, facing_front: bool = false) -> void:
 	# Rear-facing waiting poses with filled trouser legs, knees and shoes.
-	var hair_colors := ["e5ae3a", "25232b", "488bd0", "563829", "773b3b", "d1b380", "e9a9bc", "65596e", "503337", "7b4d3b", "b6834c", "3b343b", "a36767", "312d38", "d4b987", "43333c", "c6a686", "44333d"]
-	var coat_colors := ["e07e32", "bb4b3e", "3b82bd", "375887", "686e88", "604b6f", "ca9bad", "584765", "aa6c6c", "535c82", "9b7655", "61746c", "985e6b", "506c80", "a07c73", "697489", "987b8c", "4f556b"]
+	var hair_colors := ["e5ae3a", "25232b", "488bd0", "563829", "773b3b", "d1b380", "e9a9bc", "65596e", "503337", "d4a55c", "c5bac1", "302e38", "a36767", "312d38", "d4b987", "43333c", "c6a686", "44333d"]
+	var coat_colors := ["e07e32", "bb4b3e", "3b82bd", "375887", "686e88", "604b6f", "ca9bad", "584765", "d9dfe2", "525572", "cfdbd5", "426768", "985e6b", "506c80", "a07c73", "697489", "987b8c", "4f556b"]
 	var hair := Color(hair_colors[person.character_id])
 	var coat := Color(coat_colors[person.character_id])
 	var outline := Color("252831")
@@ -477,10 +500,25 @@ func _draw_back_waiter(pos: Vector2, person: Dictionary, scale: float, seated: f
 		draw_rect(Rect2(x - 6 * scale, top + 7 * scale, 12 * scale, 2 * scale), Color(0.18, 0.25, 0.38, opacity))
 	else:
 		draw_rect(Rect2(x - 6 * scale, top + 10 * scale, 12 * scale, 3 * scale), hair.darkened(0.18))
+	if facing_front:
+		# The far-side seat faces the road and the viewer. Shape the face, fringe,
+		# eyes and collar in layers so it reads as a character, not a block.
+		var skin := Color(0.94, 0.70, 0.57, opacity)
+		var face := PackedVector2Array([Vector2(x - 5 * scale, top + 6 * scale), Vector2(x + 5 * scale, top + 6 * scale), Vector2(x + 5 * scale, top + 11 * scale), Vector2(x + 3 * scale, top + 14 * scale), Vector2(x - 3 * scale, top + 14 * scale), Vector2(x - 5 * scale, top + 11 * scale)])
+		draw_colored_polygon(face, skin)
+		draw_rect(Rect2(x - 5 * scale, top + 5 * scale, 10 * scale, 2 * scale), hair)
+		draw_rect(Rect2(x - 4 * scale, top + 8 * scale, 2 * scale, 2 * scale), outline)
+		draw_rect(Rect2(x + 2 * scale, top + 8 * scale, 2 * scale, 2 * scale), outline)
+		draw_rect(Rect2(x - 0.5 * scale, top + 12 * scale, scale, scale), Color(0.65, 0.32, 0.31, opacity))
+		if person.character_id == 8:
+			draw_rect(Rect2(x - 8 * scale, top + 4 * scale, 3 * scale, 3 * scale), Color(0.94, 0.72, 0.25, opacity))
+
 	var body_y := top + 14 * scale
 	draw_rect(Rect2(x - 8 * scale, body_y + 2 * scale, 16 * scale, 12 * scale), outline)
 	draw_rect(Rect2(x - 6 * scale, body_y + 3 * scale, 12 * scale, 10 * scale), coat)
 	draw_rect(Rect2(x - 3 * scale, body_y + 4 * scale, 6 * scale, 2 * scale), coat.lightened(0.14))
+	if facing_front:
+		draw_rect(Rect2(x - scale, body_y + 4 * scale, 2 * scale, 4 * scale), Color(0.58, 0.20, 0.24, opacity))
 	var hip_y := lerpf(pos.y - 13 * scale, pos.y - 10 * scale, seated)
 	for side in [-1, 1]:
 		var leg_x := x + (float(side) * 3.5 - 2.5) * scale
@@ -768,14 +806,15 @@ func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
 	# Each loop includes an approach, a short stop, and a departure.
 	var cycle := fposmod(seconds, 70.0)
 	var distance: float
+	var stop_distance: float = scene_width * 0.5 - 90.0 if reversed else Residents.FAR_BUS_X
 	if cycle < 25.0:
 		var t := cycle / 25.0
-		distance = lerpf(-210.0, scene_width * 0.5 - 90.0, 1.0 - pow(1.0 - t, 2.0))
+		distance = lerpf(-210.0, stop_distance, 1.0 - pow(1.0 - t, 2.0))
 	elif cycle < 33.0:
-		distance = scene_width * 0.5 - 90.0
+		distance = stop_distance
 	else:
 		var t := (cycle - 33.0) / 37.0
-		distance = lerpf(scene_width * 0.5 - 90.0, scene_width + 210.0, t * t)
+		distance = lerpf(stop_distance, scene_width + 210.0, t * t)
 	return scene_width - distance - 185.0 if reversed else distance
 
 func _draw_compact_escalators() -> void:

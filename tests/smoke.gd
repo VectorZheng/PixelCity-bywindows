@@ -39,6 +39,9 @@ func _initialize() -> void:
 	assert(is_equal_approx(city._bus_x(25.0, image_size.x, false), city._bus_x(32.0, image_size.x, false)))
 	assert(city._bus_x(40.0, image_size.x, false) > city._bus_x(33.0, image_size.x, false))
 	assert(city._bus_x(40.0, image_size.x, true) < city._bus_x(33.0, image_size.x, true))
+	# Waterfront bus door lines up with its own shelter, not the other stop.
+	assert(is_equal_approx(city._bus_x(28.0, image_size.x, false), 724.0))
+	assert(is_equal_approx(city._bus_x(28.0, image_size.x, false) + 160.0 * 0.35, 780.0))
 	# Buses remain at the stop while cars keep moving and use the passing lane.
 	assert(is_equal_approx(city._bus_x(28.0, image_size.x, false), city._bus_x(29.0, image_size.x, false)))
 	assert(city._car_x(21.0, image_size.x, false) > city._car_x(20.0, image_size.x, false))

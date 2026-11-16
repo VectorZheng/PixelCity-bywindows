@@ -2,6 +2,9 @@ extends RefCounted
 
 # Positions are in original artwork coordinates. The simulation remains independent
 # of rendering and can be stepped deterministically in tests.
+const FAR_SHELTER_X := 680.0
+const FAR_DOOR_X := 780.0
+const FAR_BUS_X := 724.0
 var people: Array[Dictionary] = []
 
 func _init() -> void:
@@ -13,7 +16,7 @@ func _init() -> void:
 			"direction": 1 if i % 2 == 0 else -1, "state": "walk", "timer": 0.0,
 			"cooldown": 0.0, "umbrella": i % 2 == 0, "mood": "开心",
 			"walk_distance": 0.0, "moving": false, "idle_due": 8.0 + i * 3.7,
-			"sit": 0.0, "wait_cooldown": 0.0, "wait_at_stop": i == 0,
+			"sit": 0.0, "wait_cooldown": 0.0, "wait_at_stop": i == 0, "wait_at_far_stop": i == 8,
 			"umbrella_open": 1.0, "stop_cooldown": 0.0})
 
 func step(delta: float, seconds: float, raining: bool) -> void:
@@ -97,20 +100,37 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool) -> 
 	if p.state in ["greet", "boarding", "onboard", "idle"]:
 		p.timer -= dt
 		if p.state == "boarding":
-			p.x = move_toward(p.x, 1100.0 if not p.platform else 1040.0, 16.0 * dt)
+			p.x = move_toward(p.x, FAR_DOOR_X if p.promenade else (1100.0 if not p.platform else 1040.0), 16.0 * dt)
 		if p.timer <= 0.0:
 			if p.state == "boarding":
 				p.state = "onboard"
 				p.timer = 6.0
 			elif p.state == "onboard":
 				p.state = "walk"
-				p.x = 1110.0 if not p.platform else 1130.0
+				p.x = 840.0 if p.promenade else (1110.0 if not p.platform else 1130.0)
 				p.wait_cooldown = 30.0
 			else:
 				p.state = "walk"
 		return
 	var bus_phase := fposmod(seconds + 32.0, 70.0)
 	var train_phase := fposmod(seconds, 100.0)
+	var far_bus_phase := fposmod(seconds + 8.0, 70.0)
+	var far_boarding: bool = p.wait_at_far_stop and p.wait_cooldown <= 0.0 and far_bus_phase >= 22.0 and far_bus_phase < 31.0
+	if p.wait_at_far_stop and p.wait_cooldown <= 0.0:
+		p.mood = "期待"
+		var far_target := FAR_DOOR_X if far_boarding else 736.0
+		if absf(p.x - far_target) > 0.5: p.direction = 1 if far_target > p.x else -1
+		if far_boarding and p.sit > 0.0:
+			p.state = "stand_up"
+			p.sit = move_toward(p.sit, 0.0, 1.4 * dt)
+			return
+		p.state = "wait_bus"
+		p.x = move_toward(p.x, far_target, 17.0 * dt)
+		p.sit = move_toward(p.sit, 1.0 if not far_boarding and absf(p.x - far_target) < 0.5 else 0.0, 1.4 * dt)
+		if far_boarding and far_bus_phase >= 26.0 and absf(p.x - far_target) < 1.0:
+			p.state = "boarding"
+			p.timer = 2.0
+		return
 	var should_board: bool = p.id == 0 and bus_phase >= 24.0 and bus_phase < 31.0
 	# One commuter deliberately waits at the bus shelter; stand before boarding.
 	if p.wait_at_stop and p.wait_cooldown <= 0.0 and not should_board:
@@ -128,8 +148,8 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool) -> 
 		p.state = "shelter"
 		p.mood = "避雨"
 		var can_sit: bool = p.id in [3, 7, 9, 11, 13, 15]
-		var seat_locations := {3: 1028.0, 7: 1068.0, 9: 425.0, 11: 443.0, 13: 461.0, 15: 1088.0}
-		var shelter_x: float = float(seat_locations[p.id]) if can_sit else ((425.0 + (p.id % 4) * 18.0) if p.promenade else 1030.0 + (p.id % 6) * 20.0)
+		var seat_locations := {3: 1028.0, 7: 1068.0, 9: 711.0, 11: 758.0, 13: 780.0, 15: 1088.0}
+		var shelter_x: float = float(seat_locations[p.id]) if can_sit else ((711.0 + (p.id % 4) * 18.0) if p.promenade else 1030.0 + (p.id % 6) * 20.0)
 		if absf(p.x - shelter_x) > 0.5: p.direction = 1 if shelter_x > p.x else -1
 		p.x = move_toward(p.x, shelter_x, 15.0 * dt)
 		p.sit = move_toward(p.sit, 1.0 if can_sit and absf(p.x - shelter_x) < 0.5 else 0.0, 1.4 * dt)

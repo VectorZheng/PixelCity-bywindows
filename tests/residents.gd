@@ -73,7 +73,7 @@ func _initialize() -> void:
 	shore.state = "walk"
 	sim.step(0.1, 25.0, true)
 	assert(shore.state == "shelter" and shore.x < 900.0)
-	shore.x = 425.0
+	shore.x = 711.0
 	for i in range(10): sim.step(0.1, 25.1 + i * 0.1, true)
 	assert(shore.sit > 0.99)
 	# The commuter sits while waiting, stands and reaches the door when it opens.
@@ -117,5 +117,16 @@ func _initialize() -> void:
 	assert(rider.state == "car_onboard")
 	for i in range(600): pickup_sim.step(0.1, 28.3 + i * 0.1, false)
 	assert(rider.state == "walk" and rider.stop_cooldown > 0.0)
+	# The waterfront commuter faces a visible stop, waits, and boards its bus.
+	var far_sim = Residents.new()
+	var far_waiter: Dictionary = far_sim.people[8]
+	far_waiter.x = 736.0
+	for i in range(12): far_sim.step(0.1, 5.0 + i * 0.1, false)
+	assert(far_waiter.state == "wait_bus" and far_waiter.sit > 0.99)
+	var far_boarded := false
+	for i in range(180):
+		far_sim.step(0.1, 6.2 + i * 0.1, false)
+		if far_waiter.state in ["boarding", "onboard"]: far_boarded = true
+	assert(far_boarded)
 	print("RESIDENT_TEST_PASSED")
 	quit(0)
