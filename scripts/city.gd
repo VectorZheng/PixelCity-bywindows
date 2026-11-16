@@ -110,7 +110,7 @@ func _capture_test() -> void:
 		capture_path = "user://preview-fog.png"
 	if OS.get_cmdline_user_args().has("--capture-far-stop"):
 		animation_time = 20.0
-		for entry in [[8, 736.0], [9, 711.0]]:
+		for entry in [[8, 656.0], [9, 631.0]]:
 			var far_person: Dictionary = residents.people[entry[0]]
 			far_person.x = entry[1]
 			far_person.state = "wait_bus" if entry[0] == 8 else "shelter"
@@ -204,7 +204,7 @@ func _build_panel() -> void:
 func _process(delta: float) -> void:
 	elapsed += delta
 	animation_time += delta
-	residents.step(delta, animation_time, _is_raining())
+	residents.step(delta, animation_time, _is_raining(), int(Time.get_datetime_dict_from_system().hour))
 	_sync_weather_effects()
 	settings_timer += delta
 	time_until_refresh -= delta
@@ -231,6 +231,12 @@ func _draw() -> void:
 	var skyline := Rect2(0, 0, image_size.x, 429)
 	draw_texture_rect_region(APPROVED_BACKGROUND, skyline, skyline)
 	_draw_environment_motion()
+	# The old waterfront shelter is painted into the background. Cover its old
+	# position with adjacent water, railings and pavement before moving the asset.
+	for i in range(6):
+		var width := minf(30.0, 155.0 - i * 30.0)
+		if width > 0.0:
+			draw_texture_rect_region(BACKDROP, Rect2(377 + i * 30, 407, width, 60), Rect2(545, 407, width, 60))
 	# Replace the opaque, painted-in shelter with matching street before traffic.
 	draw_texture_rect_region(BACKDROP, Rect2(990, 470, 190, 94), Rect2(700, 470, 190, 94))
 	_draw_sun(Time.get_datetime_dict_from_system())
@@ -328,7 +334,7 @@ func _sync_weather_effects() -> void:
 	rain_fx.set_param(&"density", rain_density)
 	var scene_scale := target.size / BACKDROP.get_size()
 	var near_roof := Rect2(target.position + Vector2(990, 475) * scene_scale, Vector2(190, 82) * scene_scale)
-	var far_roof := Rect2(target.position + Vector2(Residents.FAR_SHELTER_X, 412) * scene_scale, Vector2(170, 53) * scene_scale)
+	var far_roof := Rect2(target.position + Vector2(Residents.FAR_SHELTER_X, 412) * scene_scale, Vector2(155, 53) * scene_scale)
 	rain_fx.set_param(&"entrance_offset", COMPACT_STATION_SHIFT if display_mode == "sky" else 0.0)
 	rain_fx.set_param(&"scene_transform", Vector4(target.position.x, target.position.y, scene_scale.x, scene_scale.y))
 	rain_fx.set_param(&"shelter_a", Vector4(near_roof.position.x, near_roof.position.y, near_roof.end.x, near_roof.end.y))
@@ -393,32 +399,32 @@ func _draw_station_screens() -> void:
 func _draw_promenade_people() -> void:
 	# The waterfront shelter is drawn in front of the background and behind traffic.
 	var x: float = Residents.FAR_SHELTER_X
+	# Move the original painted shelter itself, including its lit glass and roof.
+	var original := PackedVector2Array([Vector2(377, 418), Vector2(384, 410), Vector2(514, 410), Vector2(522, 418), Vector2(516, 422), Vector2(516, 465), Vector2(382, 465), Vector2(382, 422)])
+	_draw_backdrop_shape(original, Vector2(x - 377.0, 0))
 	var frame := Color("283047")
-	draw_rect(Rect2(x + 5, 422, 160, 38), Color(0.15, 0.23, 0.34, 0.30))
-	draw_colored_polygon(PackedVector2Array([Vector2(x, 422), Vector2(x + 8, 413), Vector2(x + 162, 413), Vector2(x + 170, 422)]), frame)
-	draw_rect(Rect2(x + 3, 420, 164, 3), Color("697082"))
-	for dx in [6, 58, 110, 164]: draw_rect(Rect2(x + dx, 423, 3, 38), frame)
-	draw_rect(Rect2(x + 4, 459, 162, 3), frame)
 	draw_rect(Rect2(x + 25, 446, 85, 3), Color("b97759"))
 	draw_rect(Rect2(x + 30, 449, 3, 10), frame)
 	draw_rect(Rect2(x + 103, 449, 3, 10), frame)
 	var arrival: int = Transit.bus_arrival_seconds(animation_time + 8.0)
 	var arrival_text := "到站" if arrival == 0 else str(arrival) + "秒"
-	draw_rect(Rect2(x + 117, 425, 44, 20), Color("142332"))
-	draw_string(_screen_font, Vector2(x + 119, 433), "模拟3路", HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color("f6cf8a"))
-	draw_string(_screen_font, Vector2(x + 119, 442), arrival_text, HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color("e9f2df"))
+	draw_rect(Rect2(x + 102, 425, 40, 20), Color("142332"))
+	draw_string(_screen_font, Vector2(x + 104, 433), "模拟3路", HORIZONTAL_ALIGNMENT_LEFT, 38, 7, Color("f6cf8a"))
+	draw_string(_screen_font, Vector2(x + 104, 442), arrival_text, HORIZONTAL_ALIGNMENT_LEFT, 38, 7, Color("e9f2df"))
 	for person in residents.people:
 		if person.promenade and person.state not in ["onboard", "car_onboard"]:
 			var y := 465.0
 			if person.state == "boarding": y = lerpf(y, 478.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+			if person.state == "alighting": y = lerpf(478.0, y, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 			_draw_resident(person, y, 0.78)
 
 func _draw_people(platform: bool, boarding_only: bool = false) -> void:
 	for person in residents.people:
 		if person.platform != platform or person.promenade or person.state in ["onboard", "car_onboard"]: continue
-		if platform and ((person.state == "boarding") != boarding_only): continue
+		if platform and ((person.state in ["boarding", "alighting"]) != boarding_only): continue
 		var y: float = (692.0 + (person.id % 2) * 3.0) if platform else (555.0 + (person.id % 3) * 2.0)
 		if person.state == "boarding": y = lerpf(y, 675.0 if platform else 515.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+		if person.state == "alighting": y = lerpf(675.0 if platform else 515.0, y, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 		if person.state == "car_boarding": y = lerpf(y, 480.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 		if person.state == "car_exit": y = lerpf(480.0, y, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 		_draw_resident(person, y, 1.0)
@@ -429,7 +435,7 @@ func _draw_resident(person: Dictionary, y: float, scale: float) -> void:
 	_draw_person(pos, phase, person, scale)
 	if person.state == "greet":
 		draw_line(pos + Vector2(person.direction * 4, -21) * scale, pos + Vector2(person.direction * 11, -29) * scale, Color("edb69a"), 2.0 * scale)
-	if _is_raining() and not person.platform and person.umbrella and person.state not in ["wait_bus", "car_boarding", "car_exit"] and person.sit < 0.05:
+	if _is_raining() and not person.platform and person.umbrella and person.state not in ["wait_bus", "car_boarding", "car_exit", "alighting"] and person.sit < 0.05:
 		if person.state == "look_board":
 			# Closed umbrella hangs at the person's side.
 			draw_line(pos + Vector2(-7, -18) * scale, pos + Vector2(-9, -2) * scale, Color("53697d"), 2.0 * scale)
@@ -455,7 +461,7 @@ func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) ->
 		texture = walk_sheets_reversed[sheet_index]
 		source.position.x = sheet.get_width() - source.end.x
 	var fade := clampf(person.timer / 2.0, 0.0, 1.0) if person.state in ["boarding", "car_boarding"] else 1.0
-	if person.state == "car_exit": fade = 1.0 - clampf(person.timer / 2.0, 0.0, 1.0)
+	if person.state in ["car_exit", "alighting"]: fade = 1.0 - clampf(person.timer / 2.0, 0.0, 1.0)
 	# A small grounding shadow makes the walking layer sit on the pavement.
 	draw_ellipse_shadow(pos, scale, fade)
 	if walking and person.sit <= 0.01:
@@ -960,4 +966,11 @@ func _update_panel() -> void:
 	if not weather.is_empty():
 		details = "%s  %.1f°C  ·  %s\n数据时间：%s（深圳）" % [_weather_name(int(weather.code)), float(weather.temperature), weather_status, str(weather.time).replace("T", " ")]
 	var demonstration := "\n画面天气：%s（演示）" % _weather_name(weather_override) if weather_override >= 0 else ""
-	_status_label.text = "深圳像素城市  ·  本机时间\n%s\n%s%s\n车辆及班次为画面模拟" % [now, details, demonstration]
+	var walking := 0
+	var waiting := 0
+	var riding := 0
+	for person in residents.people:
+		if person.state in ["onboard", "car_onboard"]: riding += 1
+		elif person.state == "wait_bus": waiting += 1
+		elif person.moving: walking += 1
+	_status_label.text = "深圳像素城市  ·  本机时间\n%s\n%s%s\n居民：%d 步行 · %d 候车 · %d 乘车\n车辆及班次为画面模拟" % [now, details, demonstration, walking, waiting, riding]
