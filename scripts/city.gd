@@ -78,6 +78,12 @@ func _capture_test() -> void:
 		capture_path = "user://preview-start.png"
 	else:
 		animation_time = 18.0
+	if OS.get_cmdline_user_args().has("--capture-pass"):
+		animation_time = 20.0
+		capture_path = "user://preview-pass.png"
+	if OS.get_cmdline_user_args().has("--capture-pass-near"):
+		animation_time = 66.0
+		capture_path = "user://preview-pass-near.png"
 	if OS.get_cmdline_user_args().has("--capture-rain"):
 		weather = {"code": 63}
 		residents.step(0.1, animation_time, true)
@@ -444,12 +450,19 @@ func _draw_road_edges(width: float) -> void:
 		draw_line(Vector2(x, 469), Vector2(minf(x + 48, width), 469), Color(0.94, 0.83, 0.69, 0.48), 1.4)
 		draw_line(Vector2(x + 55, 532), Vector2(minf(x + 103, width), 532), Color(0.94, 0.83, 0.69, 0.48), 1.4)
 
-func _lane_car_x(bus_x: float, scene_width: float, reversed: bool) -> float:
-	# Each car follows its bus at a safe gap and stops behind it; both wrap offscreen.
+func _car_x(seconds: float, scene_width: float, reversed: bool) -> float:
+	# Independent constant-speed loops; wrapping occurs beyond the visible edges.
 	var ring := scene_width + 420.0
 	if reversed:
-		return fposmod(bus_x + 280.0 + 395.0, ring) - 395.0
-	return fposmod(bus_x - 220.0 + 210.0, ring) - 210.0
+		return scene_width + 25.0 - fposmod(seconds * 64.0 - 535.0, ring)
+	return fposmod(seconds * 65.0 - 174.0, ring) - 210.0
+
+func _passing_lane_amount(car_x: float, bus_x: float, reversed: bool) -> float:
+	# Shift into the further lane before reaching the bus, then smoothly return.
+	var bus_width := 170.0 if reversed else 185.0
+	var direction := -1.0 if reversed else 1.0
+	var relative := (car_x + 40.0 - (bus_x + bus_width / 2.0)) * direction
+	return smoothstep(-240.0, -130.0, relative) * (1.0 - smoothstep(125.0, 210.0, relative))
 
 func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 	var texture: Texture2D = vehicles_reversed if reversed else VEHICLES
@@ -473,12 +486,14 @@ func _draw_bus(target: Rect2, bounds: Vector2, reversed: bool) -> void:
 func _draw_traffic(bounds: Vector2) -> void:
 	var far_bus_x := _bus_x(animation_time + 8.0, bounds.x, false)
 	var near_bus_x := _bus_x(animation_time + 32.0, bounds.x, true)
-	var far_car_x := _lane_car_x(far_bus_x, bounds.x, false)
-	var near_car_x := _lane_car_x(near_bus_x, bounds.x, true)
-	# Each direction has one wheel baseline; nearer lane is painted in front.
-	_draw_vehicle(VEHICLES, Rect2(1285, 320, 875, 320), Rect2(far_car_x, 463, 80, 27), bounds)
+	var far_car_x := _car_x(animation_time, bounds.x, false)
+	var near_car_x := _car_x(animation_time, bounds.x, true)
+	var far_offset := _passing_lane_amount(far_car_x, far_bus_x, false) * 10.0
+	var near_offset := _passing_lane_amount(near_car_x, near_bus_x, true) * 10.0
+	# The passing lane is farther away, so the car is drawn beneath its bus.
+	_draw_vehicle(VEHICLES, Rect2(1285, 320, 875, 320), Rect2(far_car_x, 463 - far_offset, 80, 27), bounds)
 	_draw_bus(Rect2(far_bus_x, 434, 185, 56), bounds, false)
-	_draw_vehicle(vehicles_reversed, Rect2(1285, 320, 875, 320), Rect2(near_car_x, 504, 80, 26), bounds, true)
+	_draw_vehicle(vehicles_reversed, Rect2(1285, 320, 875, 320), Rect2(near_car_x, 504 - near_offset, 80, 26), bounds, true)
 	_draw_bus(Rect2(near_bus_x, 483, 170, 47), bounds, true)
 	# Visual simulation: the train runs on the rails, not the walking surface.
 	_draw_vehicle(METRO, METRO_SOURCE, Rect2(_train_x(animation_time, bounds.x), 658, 660, 51), bounds)
