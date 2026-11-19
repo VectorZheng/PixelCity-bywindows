@@ -2,6 +2,9 @@ extends Node2D
 
 const BACKDROP: Texture2D = preload("res://assets/city-clean.png")
 const APPROVED_BACKGROUND: Texture2D = preload("res://assets/shenzhen-no-sun.png")
+const ENTRANCE_ART: Texture2D = preload("res://assets/huaxin-entrances.png")
+const SHELTER_ART: Texture2D = preload("res://assets/shenzhen-shelter.png")
+const SHELTER_SOURCE := Rect2(37, 71, 1835, 722)
 const METRO: Texture2D = preload("res://assets/shenzhen-metro3.png")
 const WALK: Texture2D = preload("res://assets/manga-walk.png")
 const WALK_FOUR: Texture2D = preload("res://assets/character-walk-four.png")
@@ -20,8 +23,11 @@ const CLOUD: Texture2D = preload("res://assets/weather-cloud.png")
 const UFO: Texture2D = preload("res://assets/ufo-cc0.png")
 const Residents = preload("res://scripts/residents.gd")
 const Transit = preload("res://scripts/transit.gd")
+const Station = preload("res://scripts/station.gd")
+const StationRoutes = preload("res://scripts/station_routes.gd")
+const StreetDetails = preload("res://scripts/street_details.gd")
 const WeatherEffects = preload("res://addons/weather_fx/weather_fx.gd")
-const COMPACT_STATION_SHIFT := 400.0
+const COMPACT_STATION_SHIFT := 545.0
 const METRO_SOURCE := Rect2(4, 277, 2164, 182)
 const WEATHER_URL := "https://api.open-meteo.com/v1/forecast?latitude=22.5431&longitude=114.0579&current=temperature_2m,weather_code,is_day&timezone=Asia%2FShanghai"
 const CACHE_PATH := "user://weather.json"
@@ -54,10 +60,11 @@ var snow_fx: WeatherFX
 var fog_fx: WeatherFX
 var window_lights: Array[Vector2] = []
 var leaf_patches: Array[Rect2] = []
+var water_glints: Array[Vector2] = []
 
 func _ready() -> void:
 	Engine.max_fps = 60
-	DisplayServer.window_set_title("深圳像素城市 · 桌面壁纸")
+	DisplayServer.window_set_title("深圳像素城市 · Preview")
 	get_window().min_size = Vector2i(600, 200)
 	settings_path = OS.get_environment("APPDATA").path_join("PixelCity").path_join("preview-display.cfg")
 	_load_display_mode()
@@ -228,6 +235,7 @@ func _build_panel() -> void:
 func _process(delta: float) -> void:
 	elapsed += delta
 	animation_time += delta
+	residents.station_shift = _current_station_shift()
 	residents.step(delta, animation_time, _is_raining(), int(Time.get_datetime_dict_from_system().hour))
 	_sync_weather_effects()
 	settings_timer += delta
@@ -247,7 +255,7 @@ func _draw() -> void:
 	var size := get_viewport_rect().size
 	var image_size := BACKDROP.get_size()
 	var target := _display_rect(size, image_size, display_mode)
-	if display_mode == "sky":
+	if display_mode == "sky" and target.position.y > 0.0:
 		_draw_extended_sky(size, target)
 	draw_texture_rect(BACKDROP, target, false)
 	draw_set_transform(target.position, 0.0, target.size / image_size)
@@ -272,17 +280,19 @@ func _draw() -> void:
 		# copies before drawing the relocated entrances and escalators.
 		draw_texture_rect_region(BACKDROP, Rect2(0, 470, 420, 94), Rect2(500, 470, 420, 94))
 		draw_texture_rect_region(BACKDROP, Rect2(1752, 470, 420, 94), Rect2(1250, 470, 420, 94))
-		_draw_escalator_wall_patches()
 	_draw_road_edges(image_size.x)
+	StreetDetails.draw_road_barrier(self, image_size.x)
 	_draw_station_interior(image_size.x)
-	_draw_compact_escalators()
 	_draw_station_screens()
+	StreetDetails.draw_far_side(self, _screen_font, animation_time)
 	_draw_promenade_people()
 	_draw_traffic(image_size)
 	_draw_platform_glass(image_size.x)
+	_draw_foreground()
+	_draw_compact_escalators()
+	_draw_escalator_riders()
 	_draw_people(true, false)
 	_draw_people(true, true)
-	_draw_foreground()
 	_draw_people(false)
 	_draw_street_lights(Time.get_datetime_dict_from_system())
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -290,7 +300,9 @@ func _draw() -> void:
 	# sunset remains unchanged. The image itself stays intact.
 	var tint := _environment_tint(Time.get_datetime_dict_from_system())
 	if tint.a > 0.0:
-		draw_rect(Rect2(Vector2.ZERO, size), tint)
+		# The underground platform is electrically lit throughout the day.
+		var surface_height := clampf(target.position.y + 564.0 * target.size.y / image_size.y, 0.0, size.y)
+		draw_rect(Rect2(0, 0, size.x, surface_height), tint)
 	_draw_lightning(size, target)
 
 func _prepare_environment_details() -> void:
@@ -305,6 +317,12 @@ func _prepare_environment_details() -> void:
 			if c.r > 0.51 and c.g > 0.27 and c.r - c.b > 0.04 and c.r + c.g + c.b - neighbour.r - neighbour.g - neighbour.b > 0.15 and maxf(neighbour.r, maxf(neighbour.g, neighbour.b)) < 0.67:
 				window_lights.append(Vector2(x, y))
 	var scene := BACKDROP.get_image()
+	for y in range(350, 403, 4):
+		for x in range(180, 1990, 19):
+			if (x + y * 3) % 7 != 0: continue
+			var water_pixel := skyline.get_pixel(x, y)
+			if water_pixel.r > 0.45 and water_pixel.r > water_pixel.g * 1.3:
+				water_glints.append(Vector2(x, y))
 	for center in [318, 635, 850, 1055, 1220, 1380, 1590, 1860]:
 		for i in range(18):
 			var x: int = center - 34 + ((i * 23 + center) % 68)
@@ -318,6 +336,11 @@ func _draw_environment_motion() -> void:
 	var hour := float(now.hour) + float(now.minute) / 60.0
 	var evening := smoothstep(16.0, 20.0, hour) if hour >= 6.0 else 1.0
 	if hour >= 6.0 and hour < 8.0: evening = 1.0 - smoothstep(6.0, 8.0, hour)
+	for i in range(water_glints.size()):
+		var p := water_glints[i]
+		var wave := sin(animation_time * 0.9 + i * 2.1)
+		var length := 3.0 + 5.0 * (0.5 + 0.5 * wave)
+		draw_line(p + Vector2(wave * 2.0, 0), p + Vector2(length + wave * 2.0, 0), Color(1.0, 0.77, 0.58, 0.05 + 0.09 * (0.5 + 0.5 * wave)), 0.7)
 	for i in range(window_lights.size()):
 		var p := window_lights[i]
 		var pulse := 0.5 + 0.5 * sin(animation_time * (0.35 + 0.09 * (i % 5)) + i * 2.4)
@@ -393,6 +416,9 @@ func _draw_sun(now: Dictionary) -> void:
 	var pos := _sun_position(now)
 	if pos.x < 0.0: return
 	var hour := float(now.hour) + float(now.minute) / 60.0 + float(now.second) / 3600.0
+	var visible := _display_rect(get_viewport_rect().size, BACKDROP.get_size(), display_mode)
+	var top := maxf(0.0, -visible.position.y / (visible.size.y / BACKDROP.get_height()))
+	pos.y = maxf(pos.y, top + 26.0)
 	var fade := minf(smoothstep(6.0, 6.5, hour), 1.0 - smoothstep(17.5, 18.0, hour))
 	var cover := 0.45 if _is_raining() else (0.7 if _visual_weather_code() == 3 else 1.0)
 	for radius in [43, 33, 25]:
@@ -417,68 +443,20 @@ func _train_status(seconds: float) -> String:
 	return "模拟 %d秒后进站" % int(ceil(100.0 - cycle))
 
 func _draw_station_interior(width: float) -> void:
-	# Stylised platform based on Huaxin station's pale tiled finishes,
-	# blue Line 3 signs, ceiling grid and floral-wrapped columns.
-	draw_rect(Rect2(0, 564, width, 92), Color("c5cbd0"))
-	draw_rect(Rect2(0, 564, width, 12), Color("e4e7e6"))
-	draw_rect(Rect2(0, 576, width, 3), Color("7e919d"))
-	for x in range(0, int(width), 54):
-		draw_line(Vector2(x, 566), Vector2(x + 12, 575), Color("aab5bb"), 0.8)
-	for x in range(48, int(width), 155):
-		draw_rect(Rect2(x, 568, 57, 2), Color("fcf4d9"))
-	for y in [598, 619, 640, 655]:
-		draw_line(Vector2(0, y), Vector2(width, y), Color("a8b3b8"), 0.7)
-	for x in range(0, int(width), 72):
-		draw_line(Vector2(x, 579), Vector2(x, 655), Color("b4bfc2"), 0.6)
-	draw_rect(Rect2(0, 650, width, 5), Color("477e98"))
-	# Columns: simplified floral artwork, not a copy of the station's mural.
-	for x in [560, 1086, 1612]:
-		draw_rect(Rect2(x - 17, 578, 34, 77), Color("dce1df"))
-		draw_rect(Rect2(x - 15, 580, 30, 61), Color("d4d9d5"))
-		for i in range(6):
-			var px: float = x - 11 + (i * 13) % 23
-			var py: float = 586 + (i * 17) % 50
-			draw_circle(Vector2(px, py), 3.0, Color("b56986"))
-			draw_circle(Vector2(px + 3, py + 2), 2.0, Color("82a691"))
-		draw_rect(Rect2(x - 17, 641, 34, 14), Color("718c9a"))
-	draw_rect(Rect2(0, 708, width, 8), Color("b5b8ae"))
-	draw_rect(Rect2(0, 708, width, 2), Color("e5bd55"))
+	Station.draw_interior(self, width)
 
 func _draw_station_screens() -> void:
 	var now := Time.get_datetime_dict_from_system()
 	var clock := "%02d:%02d" % [now.hour, now.minute]
-	for x in ([820, 1222] if _current_station_shift() > 0.01 else [630, 1444]):
-		draw_rect(Rect2(x, 584, 130, 31), Color("174f80"))
-		draw_rect(Rect2(x, 584, 130, 2), Color("b6d4df"))
-		draw_string(_screen_font, Vector2(x + 4, 596), "3  华新  Huaxin", HORIZONTAL_ALIGNMENT_LEFT, 124, 10, Color("f7fbfa"))
-		draw_string(_screen_font, Vector2(x + 4, 609), clock + "  " + _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 124, 9, Color("edf2dd"))
+	for x in [828, 1190]:
+		draw_rect(Rect2(x - 2, 587, 158, 31), Color("3b4c55"))
+		draw_rect(Rect2(x, 589, 154, 27), Color("162b37"))
+		draw_rect(Rect2(x, 589, 3, 27), Color("0098d6"))
+		draw_string(_screen_font, Vector2(x + 8, 601), "3  华新  Huaxin", HORIZONTAL_ALIGNMENT_LEFT, 142, 10, Color("f0f3ec"))
+		draw_string(_screen_font, Vector2(x + 8, 612), clock + "  " + _train_status(animation_time), HORIZONTAL_ALIGNMENT_LEFT, 142, 8, Color("e9d599"))
 
 func _draw_platform_glass(width: float) -> void:
-	# Draw a transparent screen-door line between train and platform. Station
-	# doors open only during the same stop interval as the train doors.
-	var opening: float = Transit.train_doors(animation_time)
-	var centers: Array[float] = []
-	var stop_centers: Array[float] = Transit.platform_door_centers()
-	var first: float = stop_centers[0]
-	var last: float = stop_centers[-1]
-	for i in range(15, 0, -1): centers.append(first - i * 55.0)
-	centers.append_array(stop_centers)
-	for i in range(1, 16): centers.append(last + i * 55.0)
-	for center in centers:
-		if center < -27.5 or center > width + 27.5: continue
-		var active: bool = opening > 0.0 and center >= first and center <= last
-		var gap: float = 12.0 * opening if active else 0.0
-		var left := center - 23.0
-		var right := center + 23.0
-		if left >= 0.0 and right <= width:
-			draw_rect(Rect2(left, 643, 23.0 - gap, 64), Color(0.73, 0.84, 0.86, 0.09))
-			draw_rect(Rect2(center + gap, 643, 23.0 - gap, 64), Color(0.73, 0.84, 0.86, 0.09))
-			draw_line(Vector2(left, 643), Vector2(left, 707), Color(0.28, 0.40, 0.45, 0.66), 1.3)
-			draw_line(Vector2(right, 643), Vector2(right, 707), Color(0.28, 0.40, 0.45, 0.66), 1.3)
-			if gap < 0.1: draw_line(Vector2(center, 646), Vector2(center, 707), Color(0.40, 0.51, 0.53, 0.65), 0.8)
-			draw_rect(Rect2(left, 697, 23.0 - gap, 1.5), Color(0.28, 0.50, 0.62, 0.65))
-			draw_rect(Rect2(center + gap, 697, 23.0 - gap, 1.5), Color(0.28, 0.50, 0.62, 0.65))
-	draw_line(Vector2(0, 642), Vector2(width, 642), Color("8ea9af"), 2.0)
+	Station.draw_glass(self, width, animation_time)
 
 func _draw_promenade_people() -> void:
 	# The waterfront shelter is drawn in front of the background and behind traffic.
@@ -500,15 +478,18 @@ func _draw_promenade_people() -> void:
 			var y := 465.0
 			if person.state == "boarding": y = lerpf(y, 478.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 			if person.state == "alighting": y = lerpf(478.0, y, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+			if person.state == "car_boarding": y = lerpf(y, 478.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+			if person.state == "car_exit": y = lerpf(478.0, y, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 			_draw_resident(person, y, 0.78)
 
 func _draw_people(platform: bool, boarding_only: bool = false) -> void:
 	for person in residents.people:
 		if person.platform != platform or person.promenade or person.state in ["onboard", "car_onboard"]: continue
+		if person.state in StationRoutes.ESCALATOR_STATES: continue
 		if platform and ((person.state in ["boarding", "alighting"]) != boarding_only): continue
-		var y: float = (692.0 + (person.id % 2) * 3.0) if platform else (555.0 + (person.id % 3) * 2.0)
-		if person.state == "boarding": y = lerpf(y, 675.0 if platform else 515.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
-		if person.state == "alighting": y = lerpf(675.0 if platform else 515.0, y, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
+		var y: float = (Station.WALK_Y + (person.id % 2) * 3.0) if platform else (555.0 + (person.id % 3) * 2.0)
+		if person.state == "boarding": y = lerpf(y, Station.BOARD_Y if platform else 515.0, 1.0 - clampf(person.timer / Transit.PASSENGER_TRANSITION_SECONDS, 0.0, 1.0))
+		if person.state == "alighting": y = lerpf(Station.BOARD_Y if platform else 515.0, y, 1.0 - clampf(person.timer / Transit.PASSENGER_TRANSITION_SECONDS, 0.0, 1.0))
 		if person.state == "car_boarding": y = lerpf(y, 480.0, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 		if person.state == "car_exit": y = lerpf(480.0, y, 1.0 - clampf(person.timer / 2.0, 0.0, 1.0))
 		_draw_resident(person, y, 1.0)
@@ -519,7 +500,7 @@ func _draw_resident(person: Dictionary, y: float, scale: float) -> void:
 	_draw_person(pos, phase, person, scale)
 	if person.state == "greet":
 		draw_line(pos + Vector2(person.direction * 4, -21) * scale, pos + Vector2(person.direction * 11, -29) * scale, Color("edb69a"), 2.0 * scale)
-	if _is_raining() and not person.platform and person.umbrella and person.state not in ["wait_bus", "car_boarding", "car_exit", "alighting"] and person.sit < 0.05:
+	if _is_raining() and not person.platform and person.umbrella and person.state not in ["wait_bus", "car_boarding", "car_exit", "alighting", "enter_metro", "exit_metro", "escalator_down", "escalator_up"] and person.sit < 0.05:
 		if person.state == "look_board":
 			# Closed umbrella hangs at the person's side.
 			draw_line(pos + Vector2(-7, -18) * scale, pos + Vector2(-9, -2) * scale, Color("53697d"), 2.0 * scale)
@@ -534,7 +515,7 @@ func _draw_resident(person: Dictionary, y: float, scale: float) -> void:
 
 func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) -> void:
 	var variant: int = person.character_id
-	var walking: bool = person.moving and person.state in ["walk", "boarding", "car_boarding", "car_pickup", "shelter", "wait_bus", "approach_stop"]
+	var walking: bool = person.moving and person.state in ["walk", "boarding", "car_boarding", "car_pickup", "shelter", "wait_bus", "approach_stop", "approach_metro", "approach_exit", "enter_metro", "exit_metro"]
 	var sheet_index := floori(float(variant) / 4.0)
 	var sheet: Texture2D = walk_sheets[sheet_index]
 	var cell := Vector2(sheet.get_width() / 4.0, sheet.get_height() / 4.0)
@@ -544,8 +525,12 @@ func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) ->
 	if person.direction < 0:
 		texture = walk_sheets_reversed[sheet_index]
 		source.position.x = sheet.get_width() - source.end.x
-	var fade := clampf(person.timer / 2.0, 0.0, 1.0) if person.state in ["boarding", "car_boarding"] else 1.0
-	if person.state in ["car_exit", "alighting"]: fade = 1.0 - clampf(person.timer / 2.0, 0.0, 1.0)
+	var crossing_duration: float = Transit.PASSENGER_TRANSITION_SECONDS if person.state in ["boarding", "alighting"] else 2.0
+	var fade := clampf(person.timer / crossing_duration, 0.0, 1.0) if person.state in ["boarding", "car_boarding"] else 1.0
+	if person.state in ["car_exit", "alighting"]: fade = 1.0 - clampf(person.timer / crossing_duration, 0.0, 1.0)
+	if person.state in StationRoutes.INSIDE_STATES: fade *= 0.60
+	if person.state in StationRoutes.ESCALATOR_STATES:
+		fade *= lerpf(0.65, 1.0, smoothstep(StationRoutes.STREET_Y, StationRoutes.STREET_Y + 36.0, pos.y))
 	# A small grounding shadow makes the walking layer sit on the pavement.
 	draw_ellipse_shadow(pos, scale, fade)
 	if walking and person.sit <= 0.01:
@@ -559,7 +544,7 @@ func _draw_person(pos: Vector2, phase: int, person: Dictionary, scale: float) ->
 		draw_texture_rect_region(texture, destination, source, Color(1, 1, 1, fade * (1.0 - blend)))
 		if blend > 0.0: draw_texture_rect_region(texture, destination, next_source, Color(1, 1, 1, fade * blend))
 		return
-	if person.state in ["look_board", "fold_umbrella"] and not person.moving:
+	if person.state in ["look_board", "fold_umbrella", "metro_fold_umbrella"] and not person.moving:
 		_draw_back_waiter(pos, person, scale, 0.0, fade)
 		return
 	if person.sit < 0.99:
@@ -697,9 +682,10 @@ func _display_rect(view: Vector2, artwork: Vector2, mode: String) -> Rect2:
 	var factor := minf(view.x / artwork.x, view.y / artwork.y) if mode in ["fit", "sky"] else maxf(view.x / artwork.x, view.y / artwork.y)
 	var output := artwork * factor
 	if mode == "sky":
-		# Enlarge uniformly and anchor the city to the bottom of the screen.
-		# The sides crop on normal displays, leaving less empty sky.
-		factor = minf(factor * 1.65, view.y / artwork.y)
+		# Keep original-aspect windows intact; taller displays crop the empty
+		# upper sky and show a larger street and platform without distortion.
+		if view.x / view.y < artwork.x / artwork.y:
+			factor = maxf(factor, view.y / 680.0)
 		output = artwork * factor
 		return Rect2(Vector2((view.x - output.x) / 2.0, view.y - output.y), output)
 	return Rect2((view - output) / 2.0, output)
@@ -894,14 +880,14 @@ func _draw_traffic(bounds: Vector2) -> void:
 	_draw_car(Rect2(near_car_x, 504.7 - near_offset, 91, 28.3), bounds, true, near_offset > 1.0)
 	_draw_bus(Rect2(near_bus_x, 487.3, 170, 45.7), bounds, true)
 	# Visual simulation: the train runs on the rails, not the walking surface.
-	var train_target := Rect2(_train_x(animation_time, bounds.x), 656, 660, 55.5)
+	var train_target := Rect2(_train_x(animation_time, bounds.x), Station.TRAIN_Y, 660, 55.5)
 	_draw_vehicle(METRO, METRO_SOURCE, train_target, bounds)
 	_draw_train_wheels(train_target, bounds)
 	var doors: float = Transit.train_doors(animation_time)
 	if doors > 0.0:
 		for fraction in Transit.TRAIN_DOOR_FRACTIONS:
 			var x: float = train_target.position.x + train_target.size.x * fraction
-			_draw_open_door(Rect2(x - 5.0 * doors, 670, 10.0 * doors, 28), bounds)
+			_draw_open_door(Rect2(x - 5.0 * doors, Station.TRAIN_Y + 14, 10.0 * doors, 35), bounds)
 
 func _draw_train_wheels(target: Rect2, bounds: Vector2) -> void:
 	# Four-car bogies share travel distance, so they turn during approach and stop at the platform.
@@ -938,70 +924,77 @@ func _bus_x(seconds: float, scene_width: float, reversed: bool) -> float:
 		distance = lerpf(stop_distance, scene_width + 210.0, t * t)
 	return scene_width - distance - 176.3 if reversed else distance
 
-func _draw_escalator_wall_patches() -> void:
-	# Restore the old stairwell wall underneath the moved escalators.
-	var left := PackedVector2Array([Vector2(132, 568), Vector2(199, 568), Vector2(299, 667), Vector2(311, 667), Vector2(317, 673), Vector2(317, 683), Vector2(311, 691), Vector2(260, 691)])
-	var right := PackedVector2Array()
-	for point in left: right.append(Vector2(2172.0 - point.x, point.y))
-	_draw_wall_shape(left, Vector2(800, 0))
-	_draw_wall_shape(right, Vector2(-800, 0))
-
-func _draw_wall_shape(points: PackedVector2Array, source_offset: Vector2) -> void:
-	var uvs := PackedVector2Array()
-	for point in points: uvs.append((point + source_offset) / BACKDROP.get_size())
-	draw_polygon(points, PackedColorArray([Color.WHITE]), uvs, BACKDROP)
-
 func _draw_compact_escalators() -> void:
 	var shift := _current_station_shift()
-	# Redraw both complete staircases over the new wall, even at original scale.
-	var left := PackedVector2Array([
-		Vector2(132, 568), Vector2(199, 568), Vector2(299, 667),
-		Vector2(311, 667), Vector2(317, 673), Vector2(317, 683),
-		Vector2(311, 691), Vector2(260, 691)])
-	var right := PackedVector2Array()
-	for point in left: right.append(Vector2(2172.0 - point.x, point.y))
-	_draw_backdrop_shape(left, Vector2(shift, 0))
-	_draw_backdrop_shape(right, Vector2(-shift, 0))
+	for right in [false, true]:
+		var mouth_x: float = 1973.0 - shift if right else 132.0 + shift
+		# A real opening in the slab, within the glass entrance. One continuous
+		# escalator spans that opening and ends directly on the platform floor.
+		draw_rect(Rect2(mouth_x - 2, 553, 71, 22), Color("273b45"))
+		Station.draw_escalator(self, right, shift, animation_time)
+
+func _draw_escalator_riders() -> void:
+	for person in residents.people:
+		if person.state not in StationRoutes.ESCALATOR_STATES: continue
+		var pos := StationRoutes.escalator_position(person.escalator_progress, person.state == "escalator_down", _current_station_shift())
+		# Riders stand on the moving treads, keeping their feet on the slope.
+		# The same upper landing is visible through the entrance glass.
+		_draw_person(pos, 0, person, 1.0)
 
 func _draw_foreground() -> void:
 	# Only redraw station silhouettes, so the road around them never clips cars.
 	var shift := _current_station_shift()
 	var left := _entrance_outline(false)
-	_draw_backdrop_shape(left, Vector2(shift, 0))
+	_draw_backdrop_shape(left, Vector2(shift, 0), ENTRANCE_ART)
 	# The right-hand source has its own shape; its visible position mirrors the left.
-	_draw_backdrop_shape(_entrance_outline(true), Vector2(-shift, 0))
+	_draw_backdrop_shape(_entrance_outline(true), Vector2(-shift, 0), ENTRANCE_ART)
+	_draw_straight_entrance_frames(shift)
+	_draw_entrance_signs(shift)
 	_draw_bus_shelter()
+	StreetDetails.draw_near_side(self, _screen_font, shift, animation_time)
 
-func _draw_backdrop_shape(source_points: PackedVector2Array, offset: Vector2) -> void:
+func _draw_backdrop_shape(source_points: PackedVector2Array, offset: Vector2, texture: Texture2D = BACKDROP) -> void:
 	var vertices := PackedVector2Array()
 	var uvs := PackedVector2Array()
 	for point in source_points:
 		vertices.append(point + offset)
-		uvs.append(point / BACKDROP.get_size())
-	draw_polygon(vertices, PackedColorArray([Color.WHITE]), uvs, BACKDROP)
+		uvs.append(point / texture.get_size())
+	draw_polygon(vertices, PackedColorArray([Color.WHITE]), uvs, texture)
+
+func _draw_straight_entrance_frames(shift: float) -> void:
+	for right in [false, true]:
+		var outline := _entrance_outline(right, shift)
+		outline.append(outline[0])
+		draw_polyline(outline, Color("53616d"), 1.4)
+		for local_x in [46.0, 104.0, 164.0, 224.0, 284.0, 344.0]:
+			var x: float = 2172.0 - local_x - shift if right else local_x + shift
+			var top: float = 486.0 if local_x <= 260.0 else 486.0 + (local_x - 260.0) * 68.0 / 155.0
+			draw_line(Vector2(x, top), Vector2(x, 554), Color("47535f"), 1.4)
+			draw_line(Vector2(x + 0.7, top), Vector2(x + 0.7, 554), Color("9fa7aa"), 0.5)
+
+func _draw_entrance_signs(shift: float) -> void:
+	for index in range(2):
+		var x: float = 70.0 + shift if index == 0 else 2012.0 - shift
+		draw_rect(Rect2(x, 489, 96, 18), Color("253840"))
+		draw_rect(Rect2(x + 2, 492, 12, 12), Color("039bd4"))
+		draw_string(_screen_font, Vector2(x + 5, 502), "3", HORIZONTAL_ALIGNMENT_LEFT, 9, 10, Color.WHITE)
+		draw_string(_screen_font, Vector2(x + 18, 502), "华新 Huaxin", HORIZONTAL_ALIGNMENT_LEFT, 75, 10, Color("f3e6cc"))
+		var tactile_x: float = 61.0 + shift if index == 0 else 2058.0 - shift
+		for tile in range(6):
+			draw_rect(Rect2(tactile_x + tile * 6, 553, 5, 4), Color("c9a566"))
 
 func _draw_bus_shelter() -> void:
-	# The panes are transparent so the road remains visible through the shelter.
-	var frame := Color("283047")
-	var edge := Color("596073")
-	draw_rect(Rect2(1000, 485, 170, 68), Color(0.15, 0.23, 0.34, 0.28))
-	draw_colored_polygon(PackedVector2Array([Vector2(990, 485), Vector2(1000, 475), Vector2(1170, 475), Vector2(1180, 485)]), frame)
-	draw_rect(Rect2(994, 483, 182, 4), edge)
-	for x in [1000, 1056, 1112, 1168]:
-		draw_rect(Rect2(x, 486, 4, 70), frame)
-	draw_rect(Rect2(998, 553, 174, 4), frame)
-	draw_rect(Rect2(1018, 538, 82, 4), Color("b97759"))
-	draw_rect(Rect2(1028, 542, 3, 10), frame)
-	draw_rect(Rect2(1090, 542, 3, 10), frame)
-	# A legible simulated route board, synced to the near-side bus stop.
-	var board := Rect2(1074, 489, 91, 38)
-	draw_rect(board.grow(2), Color("202b3c"))
-	draw_rect(board, Color("111b26"))
-	draw_rect(Rect2(board.position.x, board.position.y, board.size.x, 2), Color("d89456"))
+	# The glass is a runtime translucent layer: traffic remains visible through
+	# it. Roof, posts, wooden bench and display bezel use the authored sprite.
+	draw_rect(Rect2(1009, 487, 147, 65), Color(0.26, 0.43, 0.48, 0.10))
+	draw_texture_rect_region(SHELTER_ART, Rect2(990, 475, 190, 82), SHELTER_SOURCE)
+	# Enlarge the screen within the frame so both route and countdown are readable.
+	draw_texture_rect_region(SHELTER_ART, Rect2(1073, 487, 87, 38), Rect2(1086, 211, 568, 247))
+	draw_rect(Rect2(1078, 492, 77, 26), Color("131f27"))
 	var arrival: int = Transit.bus_arrival_seconds(animation_time + 32.0)
 	var arrival_text := "已到站" if arrival == 0 else str(arrival) + " 秒后到站"
-	draw_string(_screen_font, Vector2(1080, 503), "模拟 3 路", HORIZONTAL_ALIGNMENT_LEFT, 80, 11, Color("f6cf8a"))
-	draw_string(_screen_font, Vector2(1080, 519), arrival_text, HORIZONTAL_ALIGNMENT_LEFT, 80, 10, Color("e9f2df"))
+	draw_string(_screen_font, Vector2(1081, 503), "模拟 3 路", HORIZONTAL_ALIGNMENT_LEFT, 72, 10, Color("f6cf8a"))
+	draw_string(_screen_font, Vector2(1081, 515), arrival_text, HORIZONTAL_ALIGNMENT_LEFT, 72, 9, Color("e9f2df"))
 
 func _train_x(seconds: float, scene_width: float) -> float:
 	return Transit.train_position(seconds, scene_width)

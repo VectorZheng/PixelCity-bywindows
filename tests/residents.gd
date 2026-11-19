@@ -41,9 +41,9 @@ func _initialize() -> void:
 	var bus: Dictionary = sim.people[0]
 	bus.x = 1100.0
 	bus.state = "walk"
-	sim.step(0.1, 64.0, false)
+	sim.step(0.1, 64.5, false)
 	assert(bus.state == "boarding")
-	for i in range(22): sim.step(0.1, 64.0, false)
+	for i in range(22): sim.step(0.1, 64.5, false)
 	assert(bus.state == "onboard")
 	var train: Dictionary = sim.people[1]
 	train.x = 1057.56
@@ -109,7 +109,8 @@ func _initialize() -> void:
 	assert(reader.state == "walk" and reader.stop_cooldown > 0.0)
 	# One unique commuter approaches the stopped car and boards it.
 	var pickup_sim = Residents.new()
-	var rider: Dictionary = pickup_sim.people[4]
+	var rider: Dictionary = pickup_sim.people[10]
+	assert(rider.promenade and not rider.platform)
 	rider.x = 1340.0
 	pickup_sim.step(0.1, 26.0, false)
 	assert(rider.state == "car_boarding")

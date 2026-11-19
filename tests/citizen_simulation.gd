@@ -27,7 +27,9 @@ func _initialize() -> void:
 			var phase := fposmod(t + 32.0, 70.0)
 			assert(phase >= 26.5 and phase < 32.0)
 		for p in sim.people:
-			assert(p.x >= 440.0 and p.x <= 1730.0)
+			# Station users can walk to the end entrances in the uncropped layout.
+			assert(p.x >= (0.0 if p.id in [5, 16] else 440.0))
+			assert(p.x <= (2172.0 if p.id in [5, 16] else 1730.0))
 			if p.trip_no > 0: trips[p.id] = true
 			if p.vehicle != "":
 				modes[p.vehicle] = true

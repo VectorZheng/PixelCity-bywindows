@@ -32,13 +32,13 @@ func _initialize() -> void:
 	var fill: Rect2 = city._display_rect(view, image_size, "fill")
 	assert(is_equal_approx(fill.size.x, 3240.0) and is_equal_approx(fill.size.y, 1080.0))
 	var sky: Rect2 = city._display_rect(Vector2(2880, 1800), image_size, "sky")
-	assert(is_equal_approx(sky.size.x, 4752.0) and is_equal_approx(sky.size.y, 1584.0))
-	assert(is_equal_approx(sky.position.x, -936.0) and is_equal_approx(sky.position.y, 216.0))
+	assert(is_equal_approx(sky.size.x, 5749.411765) and is_equal_approx(sky.size.y, 1916.470588))
+	assert(is_equal_approx(sky.position.x, -1434.705882) and is_equal_approx(sky.position.y, -116.470588))
 	assert(is_equal_approx(sky.end.y, 1800.0))
 	# Original aspect keeps the original two entrances; compact crop moves them.
 	assert(is_zero_approx(city._station_shift(Vector2(1500, 500), image_size, "sky")))
 	assert(is_zero_approx(city._station_shift(view, image_size, "fit")))
-	assert(is_equal_approx(city._station_shift(Vector2(2880, 1800), image_size, "sky"), 400.0))
+	assert(is_equal_approx(city._station_shift(Vector2(2880, 1800), image_size, "sky"), 526.0))
 	# Areas beside and above each sloped entrance remain visible to traffic.
 	var left: PackedVector2Array = city._entrance_outline(false)
 	var right: PackedVector2Array = city._entrance_outline(true)

@@ -2,6 +2,18 @@ extends RefCounted
 
 # Door centers of the six-car preview sprite, from rear to front.
 const TRAIN_DOOR_FRACTIONS := [0.086, 0.170, 0.247, 0.319, 0.396, 0.466, 0.542, 0.615, 0.691, 0.764, 0.840, 0.913]
+const PASSENGER_TRANSITION_SECONDS := 2.0
+
+# A crossing must finish while the doors are fully open, before closing starts.
+# These intervals govern boarding AND alighting on both sidewalks and the metro.
+static func passenger_crossing_allowed(seconds: float, vehicle: String) -> bool:
+	if vehicle == "metro":
+		var phase := fposmod(seconds, 100.0)
+		return phase >= 22.0 and phase < 38.0 - PASSENGER_TRANSITION_SECONDS
+	if vehicle in ["near_bus", "far_bus"]:
+		var phase := fposmod(seconds + (32.0 if vehicle == "near_bus" else 8.0), 70.0)
+		return phase >= 26.5 and phase < 31.0 - PASSENGER_TRANSITION_SECONDS
+	return false
 
 # Door intervals share the same simulated stop cycle as the on-screen vehicles.
 # The train runs on straight rails; easing models braking and acceleration rather

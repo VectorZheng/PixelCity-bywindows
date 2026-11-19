@@ -1,0 +1,142 @@
+extends RefCounted
+
+# Architecture and live objects share scene coordinates. The generated image is
+# only used below the street; its sky and roads never replace the approved city.
+const ART: Texture2D = preload("res://assets/huaxin-platform.png")
+const ESCALATOR: Texture2D = preload("res://assets/metro-escalator.png")
+const Transit = preload("res://scripts/transit.gd")
+const StationRoutes = preload("res://scripts/station_routes.gd")
+const TOP := 564.0
+const GLASS_TOP := 624.0
+const THRESHOLD := 694.0
+const WALK_Y := StationRoutes.PLATFORM_Y
+const BOARD_Y := 687.0
+const TRAIN_Y := 638.0
+const PANE_SOURCE := Rect2(656, 629, 71, 57)
+const POST_SOURCE := Rect2(640, 625, 3, 67)
+const PILLARS := [Rect2(420, 564, 64, 150), Rect2(1666, 564, 65, 150)]
+
+static func door_centers(width: float) -> Array[float]:
+	var active := Transit.platform_door_centers()
+	var centers: Array[float] = []
+	var count := ceili(width / 50.0)
+	for i in range(count, 0, -1): centers.append(active[0] - i * 50.0)
+	centers.append_array(active)
+	for i in range(1, count + 1): centers.append(active[-1] + i * 50.0)
+	return centers
+
+static func draw_interior(canvas: Node2D, width: float) -> void:
+	var ceiling := Rect2(0, TOP, width, GLASS_TOP - TOP)
+	canvas.draw_texture_rect_region(ART, ceiling, ceiling)
+	# Reuse the authored tunnel material, without the baked door mullions. Live
+	# door positions below correspond to the actual train, including its end cars.
+	for x in range(0, ceili(width), 71):
+		var tile_width := minf(71.0, width - x)
+		canvas.draw_texture_rect_region(ART, Rect2(x, GLASS_TOP, tile_width, THRESHOLD - GLASS_TOP), Rect2(PANE_SOURCE.position, Vector2(tile_width, PANE_SOURCE.size.y)), Color(0.63, 0.69, 0.72))
+	var floor_area := Rect2(0, THRESHOLD, width, 724.0 - THRESHOLD)
+	canvas.draw_texture_rect_region(ART, floor_area, floor_area)
+	canvas.draw_line(Vector2(0, 691), Vector2(width, 691), Color("52616a"), 1.0)
+	canvas.draw_line(Vector2(0, 693), Vector2(width, 693), Color("b4bcba"), 1.0)
+
+static func draw_glass(canvas: Node2D, width: float, seconds: float) -> void:
+	var centers := door_centers(width)
+	var active := Transit.platform_door_centers()
+	var opening := Transit.train_doors(seconds)
+	for i in range(centers.size() - 1):
+		var center := centers[i]
+		if center < -50.0 or center > width + 50.0: continue
+		var is_active := center >= active[0] and center <= active[-1]
+		var gap := 5.0 * opening if is_active else 0.0
+		# Fixed glass and the two sliding leaves have textured reflections. The
+		# opening itself is left clear; the train's doorway remains visible there.
+		_glass_pane(canvas, Rect2(center - 9, GLASS_TOP + 2, 9 - gap, 66), width)
+		_glass_pane(canvas, Rect2(center + gap, GLASS_TOP + 2, 9 - gap, 66), width)
+		_glass_pane(canvas, Rect2(center + 9, GLASS_TOP + 2, centers[i + 1] - center - 18, 66), width)
+		for x in [center - 9, center + 9, center - gap, center + gap]:
+			if x < 0 or x >= width: continue
+			canvas.draw_texture_rect_region(ART, Rect2(x - 0.5, GLASS_TOP + 1, 1, 68), POST_SOURCE)
+		for side in [-1.0, 1.0]:
+			var sticker_x: float = center + side * (3.0 + gap)
+			if sticker_x < 0 or sticker_x + 3 >= width: continue
+			canvas.draw_texture_rect_region(ART, Rect2(sticker_x, 658, 3, 3), Rect2(569, 652, 14, 11))
+		if center >= 0 and center <= width:
+			var warning := is_active and opening > 0.0 and opening < 1.0
+			var lamp := Color("e4b35c") if warning and fposmod(seconds, 0.6) < 0.3 else Color("708f72")
+			canvas.draw_rect(Rect2(center - 1.5, 626, 3, 1.5), lamp)
+	canvas.draw_texture_rect_region(ART, Rect2(0, 621, width, 4), Rect2(0, 621, width, 4))
+	# The front edge of the platform covers the bogies, and provides a tactile
+	# boarding strip. Passengers are drawn later, standing on this floor.
+	var edge := Rect2(0, THRESHOLD, width, 8)
+	canvas.draw_texture_rect_region(ART, edge, edge)
+	for pillar in PILLARS:
+		canvas.draw_texture_rect_region(ART, pillar, pillar)
+	# One slim central floral column keeps Huaxin's distinctive material visible
+	# in the compact composition. It sits between, never across, boarding doors.
+	canvas.draw_texture_rect_region(ART, Rect2(1072, TOP, 22, 150), PILLARS[0])
+
+static func _glass_pane(canvas: Node2D, pane: Rect2, width: float) -> void:
+	var clipped := pane.intersection(Rect2(0, GLASS_TOP, width, THRESHOLD - GLASS_TOP))
+	if not clipped.has_area(): return
+	canvas.draw_texture_rect_region(ART, clipped, PANE_SOURCE, Color(0.91, 0.97, 1.0, 0.20))
+	canvas.draw_line(Vector2(clipped.position.x, 676), Vector2(clipped.end.x, 676), Color(0.63, 0.76, 0.78, 0.24), 1)
+
+static func escalator_points(right: bool, shift: float) -> PackedVector2Array:
+	var points := PackedVector2Array([
+		Vector2(132, 556), Vector2(199, 556), Vector2(473, WALK_Y), Vector2(410, WALK_Y)])
+	for i in range(points.size()):
+		points[i].x = 2172.0 - points[i].x - shift if right else points[i].x + shift
+	return points
+
+static func _escalator_vertex(source: Vector2, right: bool, shift: float) -> Vector2:
+	# Preserve metal thickness while adapting the authored ramp to the real
+	# route. Shear only its slope, keeping both end landings horizontal.
+	const SCALE := 270.0 / 1855.0
+	var ramp := clampf((source.x - 185.0) / 1855.0, 0, 1)
+	var extra_rise := 156.0 - 524.0 * SCALE
+	var x := 165.0 + (source.x - 185.0) * SCALE
+	var y := StationRoutes.STREET_Y + (source.y - 149.0) * SCALE + extra_rise * ramp
+	return Vector2(2172.0 - x - shift if right else x + shift, y)
+
+static func draw_escalator(canvas: Node2D, right: bool, shift: float, seconds: float) -> void:
+	# Only the brushed-metal body comes from the raster asset. Glass edges,
+	# posts and handrails are exact geometry, with round returns only at ends.
+	var size := ESCALATOR.get_size()
+	var sections := [
+		PackedVector2Array([Vector2(0, 100), Vector2(185, 100), Vector2(185, 215), Vector2(0, 215)]),
+		PackedVector2Array([Vector2(185, 149), Vector2(2040, 673), Vector2(2040, 724), Vector2(185, 215)]),
+		PackedVector2Array([Vector2(2040, 630), Vector2(size.x, 630), Vector2(size.x, 724), Vector2(2040, 724)])]
+	for source in sections:
+		var vertices := PackedVector2Array()
+		var uv := PackedVector2Array()
+		for point in source:
+			vertices.append(_escalator_vertex(point, right, shift))
+			uv.append(point / size)
+		canvas.draw_polygon(vertices, PackedColorArray([Color.WHITE]), uv, ESCALATOR)
+	var upper := StationRoutes.escalator_position(1 if right else 0, not right, shift)
+	var lower := StationRoutes.escalator_position(0 if right else 1, not right, shift)
+	var panel := PackedVector2Array([upper + Vector2(0, -20), lower + Vector2(0, -20), lower, upper])
+	canvas.draw_polygon(panel, PackedColorArray([Color(0.78, 0.90, 0.89, 0.78), Color(0.78, 0.90, 0.89, 0.78), Color(0.37, 0.59, 0.62, 0.70), Color(0.37, 0.59, 0.62, 0.70)]))
+	for t in [0.15, 0.30, 0.45, 0.60, 0.75, 0.90]:
+		var post := upper.lerp(lower, t)
+		canvas.draw_line(post + Vector2(0, -19), post, Color("829c9f"), 1.2)
+		canvas.draw_line(post + Vector2(0.8, -19), post + Vector2(0.8, 0), Color("c2cfcb"), 0.5)
+	for end in [upper, lower]:
+		var center: Vector2 = end + Vector2(0, -10)
+		var left_return: bool = (end == upper) != right
+		var start := PI / 2.0 if left_return else -PI / 2.0
+		var points := PackedVector2Array([center])
+		for i in range(17):
+			var angle := start + PI * i / 16.0
+			points.append(center + Vector2(cos(angle), sin(angle)) * 10.0)
+		canvas.draw_colored_polygon(points, Color(0.64, 0.81, 0.82, 0.78))
+		canvas.draw_arc(center, 10, start, start + PI, 17, Color("283c43"), 2.3)
+		canvas.draw_arc(center, 8.5, start, start + PI, 17, Color("b7c6c4"), 0.8)
+	canvas.draw_line(upper + Vector2(0, -20), lower + Vector2(0, -20), Color("283c43"), 2.3)
+	canvas.draw_line(upper + Vector2(0, -21), lower + Vector2(0, -21), Color("b7c6c4"), 0.8)
+	canvas.draw_line(upper, lower, Color("6f878d"), 1.3)
+	canvas.draw_line(upper + Vector2(0, 8), lower + Vector2(0, 8), Color("5b6b73"), 0.8)
+	# Treads and riders use one duration and route, with no sliding feet.
+	for i in range(27):
+		var t := fposmod(float(i) / 27.0 + seconds / StationRoutes.RIDE_SECONDS, 1.0)
+		var point := StationRoutes.escalator_position(t, not right, shift)
+		canvas.draw_line(point + Vector2(-3, -1), point + Vector2(3, -1), Color("c9cbba"), 1.0)
