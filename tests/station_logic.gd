@@ -66,11 +66,15 @@ func _initialize() -> void:
 	# Follow a complete street -> entrance -> escalator -> platform trip, and
 	# its reverse. The same geometry is used by the simulation and renderer.
 	for shift in [0.0, 400.0, 526.0]:
-		for right in [false, true]:
-			var upper: Vector2 = Station._escalator_vertex(Vector2(185, 149), right, shift)
-			var lower: Vector2 = Station._escalator_vertex(Vector2(2040, 673), right, shift)
-			assert(upper.is_equal_approx(Routes.escalator_position(1 if right else 0, not right, shift)))
-			assert(lower.is_equal_approx(Routes.escalator_position(0 if right else 1, not right, shift)))
+		# Only this side's entrance remains: its down escalator follows the art,
+		# and the up escalator runs right behind it, offset by UP_OFFSET.
+		var upper: Vector2 = Station._escalator_vertex(Vector2(185, 149), false, shift)
+		var lower: Vector2 = Station._escalator_vertex(Vector2(2040, 673), false, shift)
+		assert(upper.is_equal_approx(Routes.escalator_position(0, true, shift)))
+		assert(lower.is_equal_approx(Routes.escalator_position(1, true, shift)))
+		assert((upper + Routes.UP_OFFSET).is_equal_approx(Routes.escalator_position(1, false, shift)))
+		assert((lower + Routes.UP_OFFSET).is_equal_approx(Routes.escalator_position(0, false, shift)))
+		assert(is_equal_approx(Routes.access_x(true, shift), Routes.access_x(false, shift)))
 		var route_sim = Residents.new()
 		route_sim.station_shift = shift
 		var down: Dictionary = route_sim.people[16]

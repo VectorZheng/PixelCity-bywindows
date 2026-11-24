@@ -142,9 +142,9 @@ func _update_person(p: Dictionary, dt: float, seconds: float, raining: bool, hou
 				p.state = "walk"
 		return
 
-	var bus_phase := fposmod(seconds + 32.0, 70.0)
-	var train_phase := fposmod(seconds, 100.0)
-	var far_bus_phase := fposmod(seconds + 8.0, 70.0)
+	var bus_phase: float = Transit.phase("near_bus", seconds)
+	var train_phase: float = Transit.phase("metro", seconds)
+	var far_bus_phase: float = Transit.phase("far_bus", seconds)
 	var far_boarding: bool = p.wait_at_far_stop and p.wait_cooldown <= 0.0 and far_bus_phase >= 22.0 and far_bus_phase < 31.0
 	if p.wait_at_far_stop and p.wait_cooldown <= 0.0:
 		p.mood = "期待"
@@ -270,7 +270,7 @@ func _update_station_trip(p: Dictionary, dt: float, seconds: float, raining: boo
 		p.escalator_progress = minf(1.0, p.escalator_progress + dt / StationRoutes.RIDE_SECONDS)
 		var point := StationRoutes.escalator_position(p.escalator_progress, down, station_shift)
 		p.x = point.x
-		p.direction = 1
+		p.direction = 1 if down else -1
 		if p.escalator_progress >= 1.0:
 			p.platform = down
 			p.state = "walk" if down else "exit_metro"

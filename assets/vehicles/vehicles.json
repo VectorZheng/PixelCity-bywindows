@@ -1,0 +1,105 @@
+{
+ "scale_note": "cars share su7-yellow.png canvas/alignment; scooter drawn at 2 px per scene pixel",
+ "recolour_stats": {
+  "opaque_px": 1000850,
+  "recoloured_px": 519747,
+  "fully_recoloured_px": 519007,
+  "fraction": 0.5193
+ },
+ "files": [
+  {
+   "file": "assets/vehicles/taxi-blue.png",
+   "kind": "taxi",
+   "canvas": [
+    2172,
+    724
+   ],
+   "source_rect": [
+    33,
+    49,
+    2106,
+    654
+   ],
+   "faces": "right",
+   "base_colour": "#2E9FE6",
+   "derived_from": "assets/su7-yellow.png"
+  },
+  {
+   "file": "assets/vehicles/car-white.png",
+   "kind": "car",
+   "canvas": [
+    2172,
+    724
+   ],
+   "source_rect": [
+    33,
+    49,
+    2106,
+    654
+   ],
+   "faces": "right",
+   "base_colour": "#ECEEF0",
+   "derived_from": "assets/su7-yellow.png"
+  },
+  {
+   "file": "assets/vehicles/car-black.png",
+   "kind": "car",
+   "canvas": [
+    2172,
+    724
+   ],
+   "source_rect": [
+    33,
+    49,
+    2106,
+    654
+   ],
+   "faces": "right",
+   "base_colour": "#212328",
+   "derived_from": "assets/su7-yellow.png"
+  },
+  {
+   "file": "assets/vehicles/car-silver.png",
+   "kind": "car",
+   "canvas": [
+    2172,
+    724
+   ],
+   "source_rect": [
+    33,
+    49,
+    2106,
+    654
+   ],
+   "faces": "right",
+   "base_colour": "#B4B8BE",
+   "derived_from": "assets/su7-yellow.png"
+  },
+  {
+   "file": "assets/vehicles/delivery-scooter.png",
+   "kind": "delivery_scooter",
+   "canvas": [
+    256,
+    104
+   ],
+   "faces": "right",
+   "cell": [
+    64,
+    52
+   ],
+   "frames": 4,
+   "rows": [
+    "meituan",
+    "eleme"
+   ],
+   "wheel_ground_y": 50,
+   "px_per_scene_px": 2,
+   "source_rect": [
+    0,
+    0,
+    256,
+    104
+   ]
+  }
+ ]
+}

@@ -106,18 +106,28 @@ func _initialize() -> void:
 			assert(is_equal_approx(transit.train_position(time, image_size.x), 750.0))
 		if transit.bus_doors(time) > 0.0:
 			assert(is_equal_approx(city._bus_x(time, image_size.x, false), city._bus_x(28.0, image_size.x, false)))
-	assert(city._train_status(0.0) == "模拟 列车进站")
-	assert(city._train_status(25.0) == "模拟 列车停站")
-	assert(city._train_status(50.0) == "模拟 列车驶离")
-	assert(city._train_status(99.0) == "模拟 1秒后进站")
-	assert(is_zero_approx(city._light_strength({"hour": 18, "minute": 0, "second": 0})))
-	assert(is_equal_approx(city._light_strength({"hour": 18, "minute": 2, "second": 30}), 0.5))
-	assert(is_equal_approx(city._light_strength({"hour": 18, "minute": 5, "second": 0}), 1.0))
-	assert(is_zero_approx(city._light_strength({"hour": 12, "minute": 0, "second": 0})))
-	assert(city._sun_position({"hour": 5, "minute": 59, "second": 0}).x < 0.0)
-	assert(city._sun_position({"hour": 12, "minute": 0, "second": 0}).x > 0.0)
-	assert(city._sun_position({"hour": 18, "minute": 0, "second": 0}).x < 0.0)
-	assert(is_equal_approx(city._environment_tint({"hour": 21, "minute": 0, "second": 0}).a, 0.42))
+	# Live environment: real sun over Shenzhen, lights and ambient follow it.
+	var Env = load("res://scripts/environment.gd")
+	var nov := {"year": 2026, "month": 11, "day": 20, "weekday": 5}
+	var at := func(h: int, m: int) -> Dictionary:
+		var d := nov.duplicate()
+		d.hour = h; d.minute = m; d.second = 0
+		return d
+	assert(Env.sun(at.call(12, 0)).elevation > 40.0)
+	assert(Env.sun(at.call(0, 0)).elevation < -30.0)
+	# November sunrise in Shenzhen is about 06:40, sunset about 17:40.
+	assert(Env.sun(at.call(6, 25)).elevation < 0.0 and Env.sun(at.call(6, 55)).elevation > 0.0)
+	assert(Env.sun(at.call(17, 30)).elevation > 0.0 and Env.sun(at.call(17, 55)).elevation < 0.0)
+	assert(Env.sky_position(Env.sun(at.call(8, 0))).x < Env.sky_position(Env.sun(at.call(16, 0))).x)
+	assert(Env.street_lights(-10.0) == 1.0 and Env.street_lights(20.0) == 0.0)
+	assert(Env.window_occupancy(at.call(3, 0)) < 0.1 and Env.window_occupancy(at.call(20, 30)) > 0.7)
+	assert(Env.light_show(at.call(20, 0)) == 1.0 and Env.light_show(at.call(23, 0)) == 0.0)
+	var night_light: Color = Env.ambient(-20.0, 0.0, 0.0)
+	var noon_light: Color = Env.ambient(50.0, 0.0, 0.0)
+	assert(night_light.r < 0.4 and noon_light.g > 0.9)
+	assert(Env.ambient(50.0, 1.0, 1.0).g < noon_light.g)
+	var phase: float = Env.moon(at.call(0, 0)).phase
+	assert(phase >= 0.0 and phase < 1.0)
 	var portrait: Rect2 = city._display_rect(Vector2(1080, 1920), image_size, "fit")
 	assert(is_equal_approx(portrait.size.x, 1080.0) and is_equal_approx(portrait.size.y, 360.0))
 	city.settings_path = "user://smoke-display.cfg"

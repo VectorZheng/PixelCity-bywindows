@@ -1,0 +1,98 @@
+[
+ {
+  "sheet": 0,
+  "row": 0,
+  "kind": "commuter",
+  "desc": "白衬衫男白领，深色西裤，蓝色工牌挂绳，黑双肩包"
+ },
+ {
+  "sheet": 0,
+  "row": 1,
+  "kind": "commuter",
+  "desc": "浅蓝衬衫女白领，深灰铅笔裙，长发，手拿咖啡"
+ },
+ {
+  "sheet": 0,
+  "row": 2,
+  "kind": "commuter",
+  "desc": "藏青西装男，白衬衫，戴眼镜，斜挎电脑包"
+ },
+ {
+  "sheet": 0,
+  "row": 3,
+  "kind": "commuter",
+  "desc": "深灰西装外套女，白内搭黑裤，马尾，边走边看手机"
+ },
+ {
+  "sheet": 1,
+  "row": 0,
+  "kind": "commuter",
+  "desc": "浅蓝衬衫男，炭灰裤，电脑包，手拿咖啡"
+ },
+ {
+  "sheet": 1,
+  "row": 1,
+  "kind": "commuter",
+  "desc": "白衬衫女，黑色铅笔裙，短发波波头，工牌，手提包"
+ },
+ {
+  "sheet": 1,
+  "row": 2,
+  "kind": "commuter",
+  "desc": "浅蓝衬衫男程序员，戴眼镜，灰双肩包，看手机"
+ },
+ {
+  "sheet": 1,
+  "row": 3,
+  "kind": "commuter",
+  "desc": "黑西装外套女，浅蓝内搭，盘发，斜挎电脑包"
+ },
+ {
+  "sheet": 2,
+  "row": 0,
+  "kind": "student",
+  "desc": "深圳校服男生，白色拉链运动上衣宝蓝袖，蓝运动裤白边，大书包"
+ },
+ {
+  "sheet": 2,
+  "row": 1,
+  "kind": "student",
+  "desc": "深圳校服女生，马尾，白蓝校服运动套装，大书包"
+ },
+ {
+  "sheet": 2,
+  "row": 2,
+  "kind": "student",
+  "desc": "深圳校服男生，短发，白蓝校服，灰色大书包，看手机"
+ },
+ {
+  "sheet": 2,
+  "row": 3,
+  "kind": "student",
+  "desc": "深圳校服女生，马尾，白蓝校服，藏青大书包"
+ },
+ {
+  "sheet": 3,
+  "row": 0,
+  "kind": "night",
+  "desc": "美团外卖骑手（步行），黄色外套和头盔，反光条，提保温外卖袋"
+ },
+ {
+  "sheet": 3,
+  "row": 1,
+  "kind": "night",
+  "desc": "夜班工人，深色连帽卫衣，深色裤子，斜挎包"
+ },
+ {
+  "sheet": 3,
+  "row": 2,
+  "kind": "other",
+  "desc": "白发老人，微驼背慢步，咖色夹克灰裤"
+ },
+ {
+  "sheet": 3,
+  "row": 3,
+  "kind": "other",
+  "desc": "运动装路人，珊瑚色速干T恤，黑色运动短裤，白跑鞋"
+ }
+]
